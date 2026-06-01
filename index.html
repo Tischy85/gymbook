@@ -293,6 +293,7 @@ async function cloudCreate() {
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY, 'X-Bin-Name': 'gymbook', 'X-Bin-Private': 'true' },
       body: JSON.stringify({ gymbook: {} })
     });
+    if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
     const data = await res.json();
     binId = data.metadata?.id;
     if (binId) {
@@ -301,10 +302,10 @@ async function cloudCreate() {
       cloudLoaded = true;
       setStatus('☁ Bereit', true);
     } else {
-      setStatus('⚠ Cloud-Fehler', false);
+      setStatus('⚠ Cloud-Fehler (kein Bin)', false);
     }
   } catch(e) {
-    setStatus('⚠ Offline', false);
+    setStatus(`⚠ Offline (${e.message})`, false);
   }
 }
 
@@ -313,14 +314,14 @@ async function cloudPull() {
     const res = await fetch(`${JSONBIN_API}/${binId}/latest`, {
       headers: { 'X-Master-Key': JSONBIN_KEY }
     });
+    if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
     setStatus('☁ Synchronisiert', true);
   } catch(e) {
-    // Fallback to localStorage if offline
     cloudLoaded = false;
-    setStatus('⚠ Offline – lokaler Modus', false);
+    setStatus(`⚠ Offline (${e.message})`, false);
   }
 }
 
