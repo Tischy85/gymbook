@@ -360,8 +360,12 @@ function storageGetAllKeys() {
 }
 
 function setStatus(msg, ok) {
-  const el = document.getElementById('save-status');
-  if (el) { el.textContent = msg; el.className = ok ? 'save-status saved' : 'save-status'; }
+  const trySet = () => {
+    const el = document.getElementById('save-status');
+    if (el) { el.textContent = msg; el.className = ok ? 'save-status saved' : 'save-status'; }
+    else { setTimeout(trySet, 100); }
+  };
+  trySet();
 }
 // ─────────────────────────────────────────────────────────────
 
@@ -823,10 +827,7 @@ function closeModal() {
 // Init
 renderNav();
 renderDay();
-setTimeout(() => cloudInit().then(() => {
-  const el = document.getElementById('save-status');
-  if (el && !el.classList.contains('saved')) renderDay();
-}), 100);
+cloudInit();
 </script>
 </body>
 </html>
