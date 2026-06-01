@@ -314,6 +314,9 @@ async function cloudPull() {
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
     setStatus('☁ Synchronisiert', true);
+    // Re-render with cloud data
+    renderNav();
+    renderDay();
   } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
