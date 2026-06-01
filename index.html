@@ -271,19 +271,14 @@ function setActiveDate(val) {
 // ── JSONBin Storage ──────────────────────────────────────────
 const JSONBIN_KEY = '$2a$10$VCqYDBoWnSoJIPwURownZ.CIQBrg2EjsTlU0D9HCpRcV1ww22TT/a';
 const JSONBIN_API = 'https://api.jsonbin.io/v3/b';
-let binId = null;         // set after first sync
-let cloudData = {};       // full in-memory mirror of cloud
+const FIXED_BIN_ID = '6a1d9cc5ddf5aa59f7805e6f';
+let binId = FIXED_BIN_ID;
+let cloudData = {};
 let cloudLoaded = false;
 
 async function cloudInit() {
-  // Try to find existing bin ID stored in localStorage
-  binId = localStorage.getItem('gymbook:binId') || null;
   setStatus('☁ Verbinde…', false);
-  if (binId) {
-    await cloudPull();
-  } else {
-    await cloudCreate();
-  }
+  await cloudPull();
 }
 
 async function cloudCreate() {
