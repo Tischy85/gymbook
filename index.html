@@ -822,7 +822,11 @@ function closeModal() {
 
 // Init
 renderNav();
-cloudInit().then(() => renderDay());
+renderDay();
+setTimeout(() => cloudInit().then(() => {
+  const el = document.getElementById('save-status');
+  if (el && !el.classList.contains('saved')) renderDay();
+}), 100);
 </script>
 </body>
 </html>
