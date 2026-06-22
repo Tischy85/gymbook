@@ -14,11 +14,11 @@
     --bg2:   #222226;
     --bg3:   #2a2a2f;
     --bg4:   #323238;
-    --border:  rgba(255,255,255,0.06);
-    --border2: rgba(255,255,255,0.11);
-    --text:  #ede8df;
-    --muted: #6b6560;
-    --muted2:#3d3a36;
+    --border:  rgba(255,255,255,0.10);
+    --border2: rgba(255,255,255,0.18);
+    --text:  #f0ede4;
+    --muted: #8a8680;
+    --muted2:#524f4a;
     --accent:  #c9a84c;
     --accent2: #a8863a;
     --accent3: #e8c97a;
@@ -98,10 +98,10 @@
   .sets-header span:nth-child(2) { text-align: left; }
   .set-row { display: grid; grid-template-columns: 24px 1fr 1fr 1fr 28px; gap: 8px; align-items: center; margin-bottom: 6px; }
   .set-num { font-family: var(--mono); font-size: 10px; color: var(--muted2); text-align: center; }
-  .set-input { background: var(--bg3); border: 0.5px solid var(--border); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 8px 10px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.15s; text-align: center; }
-  .set-input:focus { border-color: var(--accent); }
-  .set-input::placeholder { color: var(--muted2); }
-  .set-input.done { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .set-input { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 13px; padding: 8px 10px; border-radius: 4px; width: 100%; outline: none; transition: border-color 0.15s; text-align: center; }
+  .set-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(201,168,76,0.15); }
+  .set-input::placeholder { color: var(--muted); }
+  .set-input.done { border-color: var(--accent); color: var(--accent); background: var(--accent-dim2); }
   .check-btn { width: 28px; height: 36px; background: none; border: 0.5px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--muted2); font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
   .check-btn:hover { border-color: var(--accent); color: var(--accent); }
   .check-btn.checked { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
