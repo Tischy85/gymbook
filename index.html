@@ -1007,87 +1007,161 @@ function toggleEx(ei) {
 // ── TIMER ─────────────────────────────────────────────────────
 let timerInterval = null;
 let timerTotal = 0;
-let timerRemaining = 0;
+let timerStartTime = null;   // timestamp when timer started
 let timerPaused = false;
-const CIRCUMFERENCE = 2 * Math.PI * 52; // 326.7
+let timerPausedAt = null;    // remaining seconds when paused
+let timerExerciseName = '';
+let notificationTimeout = null;
+const CIRCUMFERENCE = 2 * Math.PI * 52;
 
 function parsePause(pauseStr) {
-  // Parse pause strings like "2:30", "90 Sek", "60–75 Sek", "75–90 Sek"
   if (!pauseStr) return 120;
-  // Range: take the higher value
   const rangeMatch = pauseStr.match(/(\d+)[–\-](\d+)/);
   if (rangeMatch) return parseInt(rangeMatch[2]);
-  // MM:SS
   const colonMatch = pauseStr.match(/(\d+):(\d+)/);
   if (colonMatch) return parseInt(colonMatch[1]) * 60 + parseInt(colonMatch[2]);
-  // Plain seconds
   const secMatch = pauseStr.match(/(\d+)/);
   if (secMatch) return parseInt(secMatch[1]);
   return 120;
 }
 
-function startTimer(seconds, exerciseName) {
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  const result = await Notification.requestPermission();
+  return result === 'granted';
+}
+
+function scheduleNotification(seconds, exerciseName) {
+  clearTimeout(notificationTimeout);
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  notificationTimeout = setTimeout(() => {
+    try {
+      new Notification('GymBook – Pause vorbei! 💪', {
+        body: `Nächster Satz: ${exerciseName}`,
+        icon: 'https://tischy85.github.io/gymbook/icon.png',
+        vibrate: [200, 100, 200]
+      });
+    } catch(e) {}
+  }, seconds * 1000);
+}
+
+function getRemainingSeconds() {
+  if (!timerStartTime) return 0;
+  if (timerPaused) return timerPausedAt;
+  const elapsed = (Date.now() - timerStartTime) / 1000;
+  return Math.max(0, timerTotal - elapsed);
+}
+
+async function startTimer(seconds, exerciseName) {
   clearInterval(timerInterval);
+  clearTimeout(notificationTimeout);
   timerTotal = seconds;
-  timerRemaining = seconds;
+  timerStartTime = Date.now();
   timerPaused = false;
+  timerPausedAt = null;
+  timerExerciseName = exerciseName;
+
+  // Request notification permission on first use
+  await requestNotificationPermission();
+  scheduleNotification(seconds, exerciseName);
+
   document.getElementById('timer-label').textContent = `Pause · ${exerciseName}`;
   document.getElementById('timer-pause-btn').textContent = 'Pause';
   document.getElementById('timer-overlay').style.display = 'flex';
+  document.getElementById('timer-progress').style.stroke = 'var(--accent)';
+
   updateTimerDisplay();
-  timerInterval = setInterval(() => {
-    if (timerPaused) return;
-    timerRemaining--;
-    if (timerRemaining <= 0) {
-      timerRemaining = 0;
-      updateTimerDisplay();
-      clearInterval(timerInterval);
-      // Vibrate on finish if supported
-      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-      document.getElementById('timer-progress').style.stroke = 'var(--pull)';
-      document.getElementById('timer-pause-btn').textContent = 'Weiter';
-    } else {
-      updateTimerDisplay();
-    }
-  }, 1000);
+  timerInterval = setInterval(timerTick, 250); // faster tick for smooth display
+}
+
+function timerTick() {
+  if (timerPaused) return;
+  const remaining = getRemainingSeconds();
+  if (remaining <= 0) {
+    clearInterval(timerInterval);
+    timerStartTime = null;
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    document.getElementById('timer-progress').style.stroke = 'var(--pull)';
+    document.getElementById('timer-pause-btn').textContent = 'Fertig';
+    document.getElementById('timer-time').textContent = '0:00';
+    document.getElementById('timer-progress').style.strokeDashoffset = CIRCUMFERENCE;
+  } else {
+    updateTimerDisplay();
+  }
 }
 
 function updateTimerDisplay() {
-  const m = Math.floor(timerRemaining / 60);
-  const s = timerRemaining % 60;
+  const remaining = getRemainingSeconds();
+  const m = Math.floor(remaining / 60);
+  const s = Math.floor(remaining % 60);
   document.getElementById('timer-time').textContent = `${m}:${String(s).padStart(2,'0')}`;
-  const progress = timerTotal > 0 ? timerRemaining / timerTotal : 0;
+  const progress = timerTotal > 0 ? remaining / timerTotal : 0;
   const offset = CIRCUMFERENCE * (1 - progress);
   document.getElementById('timer-progress').style.strokeDashoffset = offset;
   document.getElementById('timer-progress').style.strokeDasharray = CIRCUMFERENCE;
-  // Color warning when < 10s
-  if (timerRemaining > 0 && timerRemaining <= 10) {
+  if (remaining > 0 && remaining <= 10) {
     document.getElementById('timer-progress').style.stroke = 'var(--push)';
-  } else if (timerRemaining > 0) {
+  } else if (remaining > 0) {
     document.getElementById('timer-progress').style.stroke = 'var(--accent)';
   }
 }
 
 function toggleTimerPause() {
-  if (timerRemaining <= 0) {
-    closeTimer();
-    return;
-  }
+  const remaining = getRemainingSeconds();
+  if (remaining <= 0) { closeTimer(); return; }
   timerPaused = !timerPaused;
-  document.getElementById('timer-pause-btn').textContent = timerPaused ? 'Weiter' : 'Pause';
+  if (timerPaused) {
+    timerPausedAt = remaining;
+    clearTimeout(notificationTimeout);
+    document.getElementById('timer-pause-btn').textContent = 'Weiter';
+  } else {
+    // Recalculate start time based on remaining
+    timerStartTime = Date.now() - ((timerTotal - timerPausedAt) * 1000);
+    timerPausedAt = null;
+    scheduleNotification(remaining, timerExerciseName);
+    document.getElementById('timer-pause-btn').textContent = 'Pause';
+  }
 }
 
 function adjustTimer(delta) {
-  timerRemaining = Math.max(0, timerRemaining + delta);
-  timerTotal = Math.max(timerTotal, timerRemaining);
+  if (timerPaused) {
+    timerPausedAt = Math.max(0, timerPausedAt + delta);
+    timerTotal = Math.max(timerTotal, timerPausedAt);
+  } else {
+    // Shift start time to simulate more/less time
+    timerStartTime -= delta * 1000;
+    const remaining = getRemainingSeconds();
+    timerTotal = Math.max(timerTotal, remaining);
+    clearTimeout(notificationTimeout);
+    scheduleNotification(remaining, timerExerciseName);
+  }
   updateTimerDisplay();
 }
 
 function closeTimer() {
   clearInterval(timerInterval);
+  clearTimeout(notificationTimeout);
+  timerStartTime = null;
+  timerPaused = false;
   document.getElementById('timer-overlay').style.display = 'none';
   document.getElementById('timer-progress').style.stroke = 'var(--accent)';
 }
+
+// Resume timer if app comes back from background
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && timerStartTime && !timerPaused) {
+    const remaining = getRemainingSeconds();
+    if (remaining <= 0) {
+      timerTick(); // trigger finish
+    } else {
+      updateTimerDisplay();
+      clearInterval(timerInterval);
+      timerInterval = setInterval(timerTick, 250);
+    }
+  }
+});
 // ─────────────────────────────────────────────────────────────
 
 function toggleDone(ei, s) {
