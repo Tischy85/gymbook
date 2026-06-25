@@ -321,6 +321,7 @@
   </div>
   <div class="header-right">
     <button class="btn" onclick="showHistory()">Verlauf</button>
+    <button class="btn" onclick="showProgress()">📈 Fortschritt</button>
     <button class="btn" onclick="exportData()">↓ Export</button>
     <label class="btn" style="cursor:pointer">↑ Import<input type="file" accept=".json" onchange="importData(event)" style="display:none"></label>
     <button class="btn" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
@@ -499,6 +500,8 @@ async function cloudPull() {
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
     loadCustomPlan();
+    loadCustomCatalog();
+    loadPauseSettings();
     setStatus('☁ Synchronisiert', true);
     // Re-render with cloud data
     renderNav();
@@ -834,6 +837,7 @@ function deleteFromCatalog(name, event) {
   const idx = CATALOG[key].exercises.indexOf(name);
   if (idx > -1) {
     CATALOG[key].exercises.splice(idx, 1);
+    saveCustomCatalog();
     renderCatalog();
   }
 }
@@ -939,6 +943,7 @@ async function saveCustomPlan() {
     });
   });
   storageSet('gymbook:customplan', JSON.stringify(DAYS));
+  saveCustomCatalog();
   setStatus('Plan gespeichert ✓', true);
   editMode = false;
   editDraft = null;
@@ -956,19 +961,47 @@ function loadCustomPlan() {
   const saved = storageGet('gymbook:customplan');
   if (!saved) return;
   try {
-    const custom = JSON.parse(saved);
+    const custom = JSON.parse(typeof saved === 'string' ? saved : JSON.stringify(saved));
+    // Restore plan – support added exercises
     custom.forEach((day, di) => {
       if (!DAYS[di]) return;
-      day.exercises.forEach((ex, ei) => {
-        if (!DAYS[di].exercises[ei]) return;
-        DAYS[di].exercises[ei].name  = ex.name;
-        DAYS[di].exercises[ei].muscle = ex.muscle;
-        DAYS[di].exercises[ei].sets  = ex.sets;
-        DAYS[di].exercises[ei].reps  = ex.reps;
-        DAYS[di].exercises[ei].pause = ex.pause;
-      });
+      DAYS[di].exercises = day.exercises.map(ex => ({
+        ...ex,
+        alternatives: ex.alternatives || []
+      }));
     });
   } catch(e) {}
+}
+
+function loadCustomCatalog() {
+  const saved = storageGet('gymbook:customcatalog');
+  if (!saved) return;
+  try {
+    const custom = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    Object.entries(custom).forEach(([key, exercises]) => {
+      if (CATALOG[key]) CATALOG[key].exercises = exercises;
+    });
+  } catch(e) {}
+}
+
+function saveCustomCatalog() {
+  const catalogData = {};
+  Object.entries(CATALOG).forEach(([key, cat]) => {
+    catalogData[key] = cat.exercises;
+  });
+  storageSet('gymbook:customcatalog', catalogData);
+}
+
+// Default pause time setting
+let defaultPauseOverrides = {}; // exerciseName -> seconds
+
+function loadPauseSettings() {
+  const saved = storageGet('gymbook:pausesettings');
+  if (saved) defaultPauseOverrides = typeof saved === 'string' ? JSON.parse(saved) : saved;
+}
+
+function savePauseSettings() {
+  storageSet('gymbook:pausesettings', defaultPauseOverrides);
 }
 
 function openEditCatalog(di, ei) {
@@ -1413,21 +1446,6 @@ function toggleTimerPause() {
   }
 }
 
-function adjustTimer(delta) {
-  if (timerPaused) {
-    timerPausedAt = Math.max(0, timerPausedAt + delta);
-    timerTotal = Math.max(timerTotal, timerPausedAt);
-  } else {
-    // Shift start time to simulate more/less time
-    timerStartTime -= delta * 1000;
-    const remaining = getRemainingSeconds();
-    timerTotal = Math.max(timerTotal, remaining);
-    clearTimeout(notificationTimeout);
-    scheduleNotification(remaining, timerExerciseName);
-  }
-  updateTimerDisplay();
-}
-
 function closeTimer() {
   clearInterval(timerInterval);
   clearTimeout(notificationTimeout);
@@ -1470,7 +1488,7 @@ function toggleDone(ei, s) {
     const ex = DAYS[currentDay].exercises[ei];
     const swappedName = swappedExercises[ei] || null;
     const displayName = swappedName || ex.name;
-    const seconds = parsePause(ex.pause);
+    const seconds = defaultPauseOverrides[displayName] || parsePause(ex.pause);
     startTimer(seconds, displayName);
   } else {
     closeTimer();
@@ -1611,6 +1629,130 @@ function hideDayPicker() {
 
 function closeModal() {
   document.getElementById('modal').style.display = 'none';
+}
+
+// ── 2. AUTO-SELECT INPUT FIELDS ──────────────────────────────
+document.addEventListener('focusin', e => {
+  if (e.target.classList.contains('set-input') || e.target.tagName === 'INPUT') {
+    setTimeout(() => e.target.select(), 0);
+  }
+});
+
+// ── 3. UNSAVED WARNING ────────────────────────────────────────
+window.addEventListener('beforeunload', e => {
+  if (dirty) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// ── 4. DEFAULT PAUSE TIME PER EXERCISE ───────────────────────
+function getEffectivePause(ex) {
+  const displayName = swappedExercises[Object.keys(swappedExercises).find(k => DAYS[currentDay].exercises[k]?.name === ex.name)] || ex.name;
+  return defaultPauseOverrides[displayName] || defaultPauseOverrides[ex.name] || parsePause(ex.pause);
+}
+
+// Save custom pause when user adjusts timer
+function adjustTimer(delta) {
+  if (timerPaused) {
+    timerPausedAt = Math.max(0, timerPausedAt + delta);
+    timerTotal = Math.max(timerTotal, timerPausedAt);
+  } else {
+    timerStartTime -= delta * 1000;
+    const remaining = getRemainingSeconds();
+    timerTotal = Math.max(timerTotal, remaining);
+    clearTimeout(notificationTimeout);
+    scheduleNotification(remaining, timerExerciseName);
+  }
+  // Save as default for this exercise
+  if (timerExerciseName) {
+    defaultPauseOverrides[timerExerciseName] = Math.round(getRemainingSeconds()) || timerTotal;
+    savePauseSettings();
+  }
+  updateTimerDisplay();
+}
+
+// ── 5. PROGRESS OVERVIEW ─────────────────────────────────────
+function showProgress() {
+  const allKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:') && k.split(':').length === 3 && !k.includes('customplan') && !k.includes('customcatalog') && !k.includes('pausesettings'));
+
+  // Count sessions per day
+  const sessionsByDay = {};
+  DAYS.forEach(d => { sessionsByDay[d.id] = 0; });
+  allKeys.forEach(k => {
+    const parts = k.split(':');
+    if (sessionsByDay[parts[1]] !== undefined) sessionsByDay[parts[1]]++;
+  });
+
+  const totalSessions = allKeys.length;
+
+  // Find best lifts per exercise
+  const bestLifts = {};
+  allKeys.forEach(k => {
+    const raw = storageGet(k);
+    if (!raw) return;
+    const sets = raw.sets || raw;
+    const swapped = raw.swapped || {};
+    const dayId = k.split(':')[1];
+    const day = DAYS.find(d => d.id === dayId);
+    if (!day) return;
+    day.exercises.forEach((ex, ei) => {
+      const name = swapped[ei] || ex.name;
+      const exSets = sets[ei]?.sets || [];
+      exSets.forEach(s => {
+        const w = parseFloat(s.weight);
+        if (!isNaN(w) && w > 0) {
+          if (!bestLifts[name] || w > bestLifts[name]) bestLifts[name] = w;
+        }
+      });
+    });
+  });
+
+  // Recent 8 sessions for activity chart
+  const recentKeys = allKeys.sort().reverse().slice(0, 8).reverse();
+
+  let html = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Fortschritt</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0">
+      <div style="background:var(--bg3);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--accent)">${totalSessions}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.06em">Einheiten gesamt</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:14px;text-align:center">
+        <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--accent)">${Object.values(sessionsByDay).reduce((a,b) => a + b, 0)}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.06em">Trainingstage</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
+      ${DAYS.map(d => `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);width:90px">${d.type}</span>
+          <div style="flex:1;background:var(--bg3);border-radius:4px;height:6px;overflow:hidden">
+            <div style="height:100%;background:var(--accent);border-radius:4px;width:${totalSessions > 0 ? Math.round((sessionsByDay[d.id] / Math.max(...Object.values(sessionsByDay), 1)) * 100) : 0}%;transition:width 0.3s"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:20px;text-align:right">${sessionsByDay[d.id]}</span>
+        </div>
+      `).join('')}
+    </div>
+
+    ${Object.keys(bestLifts).length > 0 ? `
+    <div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Bestleistungen</div>
+      ${Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([name, weight]) => `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)">
+          <span style="font-size:12px;color:var(--text)">${name}</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${weight} kg</span>
+        </div>
+      `).join('')}
+    </div>
+    ` : '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:20px 0">Noch keine Gewichte eingetragen</div>'}
+  `;
+
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
 }
 
 // Init
