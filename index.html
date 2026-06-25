@@ -235,6 +235,29 @@
   #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 13px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
   #timer-skip-btn:hover { border-color: var(--muted); color: var(--text); }
 
+  /* EDIT MODE */
+  .edit-mode-bar { background: rgba(201,168,76,0.08); border: 0.5px solid rgba(201,168,76,0.25); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .edit-mode-label { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.06em; }
+  .edit-card { background: var(--bg2); border: 1px solid rgba(201,168,76,0.2); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .edit-card-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 0.5px solid var(--border); }
+  .edit-ex-num { font-family: var(--mono); font-size: 10px; color: var(--muted2); width: 18px; flex-shrink: 0; }
+  .edit-ex-name { font-size: 13px; font-weight: 600; color: var(--accent); flex: 1; }
+  .edit-swap-btn { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 10px; padding: 5px 10px; border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .edit-swap-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .edit-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; padding: 12px 16px; }
+  .edit-field { display: flex; flex-direction: column; gap: 4px; }
+  .edit-field label { font-family: var(--mono); font-size: 9px; color: var(--muted2); text-transform: uppercase; letter-spacing: 0.06em; }
+  .edit-field input { background: #111114; border: 1px solid rgba(255,255,255,0.22); color: #f5f2eb; font-family: var(--mono); font-size: 13px; padding: 8px; border-radius: 4px; outline: none; text-align: center; width: 100%; transition: border-color 0.15s; }
+  .edit-field input:focus { border-color: var(--accent); }
+  .edit-save-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 8px 16px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+  .edit-save-btn:hover { background: var(--accent3); }
+  .edit-discard-btn { background: none; border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 8px 14px; border-radius: 4px; cursor: pointer; }
+  .edit-discard-btn:hover { border-color: var(--red); color: var(--red); }
+  #edit-plan-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .edit-new-ex { background: var(--bg2); border: 1px dashed rgba(201,168,76,0.25); border-radius: 8px; padding: 16px; margin-top: 8px; }
+  .edit-new-ex-title { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.06em; margin-bottom: 12px; }
+  .edit-new-ex-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 4px; }
+
   /* DAY PICKER PANEL */
   .day-picker-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 8px; padding: 8px; }
   .day-pick-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; border: none; background: none; cursor: pointer; transition: background 0.15s; width: 100%; text-align: left; }
@@ -300,6 +323,7 @@
     <button class="btn" onclick="showHistory()">Verlauf</button>
     <button class="btn" onclick="exportData()">↓ Export</button>
     <label class="btn" style="cursor:pointer">↑ Import<input type="file" accept=".json" onchange="importData(event)" style="display:none"></label>
+    <button class="btn" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
     <button class="btn btn-accent" onclick="saveSession()">Speichern</button>
   </div>
 </div>
@@ -307,9 +331,9 @@
 <div class="nav" id="day-nav"></div>
 <div class="main" id="main-content"></div>
 
-<div class="save-bar">
+<div class="save-bar" id="save-bar">
   <span class="save-status" id="save-status">Nicht gespeichert</span>
-  <button class="btn btn-accent" onclick="saveSession()">Einheit speichern</button>
+  <button class="btn btn-accent" id="save-bar-btn" onclick="saveSession()">Einheit speichern</button>
 </div>
 
 <!-- TIMER OVERLAY -->
@@ -474,6 +498,7 @@ async function cloudPull() {
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
+    loadCustomPlan();
     setStatus('☁ Synchronisiert', true);
     // Re-render with cloud data
     renderNav();
@@ -692,7 +717,7 @@ const CATALOG = {
       <ellipse cx="18" cy="26" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
       <ellipse cx="42" cy="26" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
     </svg>`,
-    exercises: ['Kabelcurl','Bizepscurl Maschine','Hammer Curl Kabel','Reverse Curl Kabel','Kabelcurl einarmig','Konzentrationscurl Kabel','Bizepscurl Langhantel','Bizepscurl Kurzhantel','Hammer Curl Kurzhantel','Schrägbankscurl Kurzhantel']
+    exercises: ['Kabelcurl','Bizepscurl Maschine','Hammer Curl Kabel','Hammer Curl einarmig','Reverse Curl Kabel','Kabelcurl einarmig','Konzentrationscurl Kabel','Bizepscurl Langhantel','Bizepscurl Kurzhantel','Hammer Curl Kurzhantel','Schrägbankscurl Kurzhantel']
   },
   trizeps: {
     label: 'Trizeps',
@@ -732,9 +757,19 @@ const CATALOG = {
 let catalogTargetEi = null;
 let catalogActiveMuscle = 'brust';
 
+function getMuscleCategoryForExercise(exerciseName) {
+  for (const [key, cat] of Object.entries(CATALOG)) {
+    if (cat.exercises.includes(exerciseName)) return key;
+  }
+  return 'brust';
+}
+
 function openCatalog(ei) {
   catalogTargetEi = ei;
-  catalogActiveMuscle = 'brust';
+  catalogTargetDi = currentDay;
+  catalogEditMode = false;
+  const swappedName = swappedExercises[ei] || DAYS[currentDay].exercises[ei].name;
+  catalogActiveMuscle = getMuscleCategoryForExercise(swappedName);
   renderCatalog();
   document.getElementById('catalog-modal').style.display = 'flex';
 }
@@ -745,8 +780,9 @@ function closeCatalog() {
 
 function renderCatalog() {
   const ei = catalogTargetEi;
-  const ex = DAYS[currentDay].exercises[ei];
-  const swappedName = swappedExercises[ei] || null;
+  const di = catalogEditMode ? catalogTargetDi : currentDay;
+  const ex = DAYS[di].exercises[ei];
+  const swappedName = catalogEditMode ? null : (swappedExercises[ei] || null);
 
   const tabs = Object.entries(CATALOG).map(([key, cat]) => `
     <button class="cat-tab ${catalogActiveMuscle === key ? 'active' : ''}" onclick="setCatalogMuscle('${key}')">
@@ -758,8 +794,18 @@ function renderCatalog() {
   const exercises = CATALOG[catalogActiveMuscle].exercises.map(name => {
     const isActive = swappedName === name;
     const isOriginal = ex.name === name;
+    const safeName = name.replace(/'/g, "\\'");
+    if (catalogEditMode) {
+      return `
+        <div class="cat-ex-row ${isOriginal ? 'cat-ex-active' : ''}">
+          <span class="cat-ex-name" onclick="applySwap(${ei}, '${safeName}')" style="flex:1;cursor:pointer">${name}${isOriginal ? ' <span class="cat-active-badge">Aktuell</span>' : ''}</span>
+          <span class="cat-ex-arrow" onclick="applySwap(${ei}, '${safeName}')" style="cursor:pointer;margin-right:10px">${isOriginal ? '✓' : '→'}</span>
+          <button onclick="deleteFromCatalog('${safeName}', event)" style="background:none;border:none;color:var(--muted2);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:color 0.15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'">✕</button>
+        </div>
+      `;
+    }
     return `
-      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, '${name.replace(/'/g, "\\'")}')">
+      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, '${safeName}')">
         <span class="cat-ex-name">${name}${isOriginal ? ' <span class="cat-original-badge">Original</span>' : ''}${isActive ? ' <span class="cat-active-badge">Aktiv</span>' : ''}</span>
         <span class="cat-ex-arrow">${isActive ? '✓' : '→'}</span>
       </div>
@@ -769,15 +815,27 @@ function renderCatalog() {
   document.getElementById('catalog-inner').innerHTML = `
     <div class="cat-header">
       <div>
-        <div class="cat-title">Übung tauschen</div>
+        <div class="cat-title">${catalogEditMode ? '✏ Katalog bearbeiten' : 'Übung tauschen'}</div>
         <div class="cat-subtitle">${ex.name}</div>
       </div>
       <button class="modal-close" onclick="closeCatalog()">×</button>
     </div>
-    ${swappedName ? `<button class="cat-reset-btn" onclick="resetSwap(${ei});closeCatalog()">↺ Zurück zu: ${ex.name}</button>` : ''}
+    ${!catalogEditMode && swappedName ? `<button class="cat-reset-btn" onclick="resetSwap(${ei});closeCatalog()">↺ Zurück zu: ${ex.name}</button>` : ''}
+    ${catalogEditMode ? '<div style="font-family:var(--mono);font-size:10px;color:var(--muted);padding:8px 20px 0">Tippe → zum Auswählen, ✕ zum Entfernen aus dem Katalog</div>' : ''}
     <div class="cat-tabs">${tabs}</div>
     <div class="cat-ex-list">${exercises}</div>
   `;
+}
+
+function deleteFromCatalog(name, event) {
+  event.stopPropagation();
+  if (!confirm(`"${name}" aus dem Katalog entfernen?`)) return;
+  const key = catalogActiveMuscle;
+  const idx = CATALOG[key].exercises.indexOf(name);
+  if (idx > -1) {
+    CATALOG[key].exercises.splice(idx, 1);
+    renderCatalog();
+  }
 }
 
 function setCatalogMuscle(key) {
@@ -786,6 +844,23 @@ function setCatalogMuscle(key) {
 }
 
 function applySwap(ei, altName) {
+  if (catalogEditMode) {
+    const di = catalogTargetDi;
+    let muscle = DAYS[di].exercises[ei].muscle;
+    for (const [key, cat] of Object.entries(CATALOG)) {
+      if (cat.exercises.includes(altName)) { muscle = cat.label; break; }
+    }
+    if (editDraft) {
+      editDraft[di].exercises[ei].name = altName;
+      editDraft[di].exercises[ei].muscle = muscle;
+    }
+    DAYS[di].exercises[ei].name = altName;
+    DAYS[di].exercises[ei].muscle = muscle;
+    catalogEditMode = false;
+    closeCatalog();
+    renderDay();
+    return;
+  }
   swappedExercises[ei] = altName;
   autoSave();
   closeCatalog();
@@ -814,6 +889,218 @@ function resetSwap(ei) {
 
 function toggleSwapPanel(ei) {}  // kept for compatibility
 
+// ── PLAN EDITOR ───────────────────────────────────────────────
+let editMode = false;
+let editDraft = null;
+let catalogTargetDi = 0;
+let catalogEditMode = false;
+
+function toggleEditMode() {
+  editMode = !editMode;
+  const btn = document.getElementById('edit-plan-btn');
+  const saveBar = document.getElementById('save-bar-btn');
+  if (editMode) {
+    editDraft = JSON.parse(JSON.stringify(DAYS));
+    btn.classList.add('active');
+    btn.textContent = '× Abbrechen';
+    saveBar.textContent = '💾 Plan speichern';
+    saveBar.onclick = saveCustomPlan;
+  } else {
+    editDraft = null;
+    btn.classList.remove('active');
+    btn.textContent = '✏ Plan';
+    saveBar.textContent = 'Einheit speichern';
+    saveBar.onclick = saveSession;
+  }
+  renderDay();
+}
+
+async function saveCustomPlan() {
+  if (!editDraft) return;
+  // Collect field values from DOM
+  DAYS.forEach((day, di) => {
+    day.exercises.forEach((ex, ei) => {
+      const setsEl = document.getElementById(`edit-sets-${di}-${ei}`);
+      const repsEl = document.getElementById(`edit-reps-${di}-${ei}`);
+      const pauseEl = document.getElementById(`edit-pause-${di}-${ei}`);
+      if (setsEl) editDraft[di].exercises[ei].sets = parseInt(setsEl.value) || ex.sets;
+      if (repsEl) editDraft[di].exercises[ei].reps = repsEl.value || ex.reps;
+      if (pauseEl) editDraft[di].exercises[ei].pause = pauseEl.value || ex.pause;
+    });
+  });
+  // Apply to DAYS
+  editDraft.forEach((day, di) => {
+    day.exercises.forEach((ex, ei) => {
+      DAYS[di].exercises[ei].name  = ex.name;
+      DAYS[di].exercises[ei].muscle = ex.muscle;
+      DAYS[di].exercises[ei].sets  = ex.sets;
+      DAYS[di].exercises[ei].reps  = ex.reps;
+      DAYS[di].exercises[ei].pause = ex.pause;
+    });
+  });
+  storageSet('gymbook:customplan', JSON.stringify(DAYS));
+  setStatus('Plan gespeichert ✓', true);
+  editMode = false;
+  editDraft = null;
+  const btn = document.getElementById('edit-plan-btn');
+  btn.classList.remove('active');
+  btn.textContent = '✏ Plan';
+  const saveBar = document.getElementById('save-bar-btn');
+  saveBar.textContent = 'Einheit speichern';
+  saveBar.onclick = saveSession;
+  renderNav();
+  renderDay();
+}
+
+function loadCustomPlan() {
+  const saved = storageGet('gymbook:customplan');
+  if (!saved) return;
+  try {
+    const custom = JSON.parse(saved);
+    custom.forEach((day, di) => {
+      if (!DAYS[di]) return;
+      day.exercises.forEach((ex, ei) => {
+        if (!DAYS[di].exercises[ei]) return;
+        DAYS[di].exercises[ei].name  = ex.name;
+        DAYS[di].exercises[ei].muscle = ex.muscle;
+        DAYS[di].exercises[ei].sets  = ex.sets;
+        DAYS[di].exercises[ei].reps  = ex.reps;
+        DAYS[di].exercises[ei].pause = ex.pause;
+      });
+    });
+  } catch(e) {}
+}
+
+function openEditCatalog(di, ei) {
+  catalogTargetDi = di;
+  catalogTargetEi = ei;
+  catalogEditMode = true;
+  catalogActiveMuscle = getMuscleCategoryForExercise(DAYS[di].exercises[ei].name);
+  renderCatalog();
+  document.getElementById('catalog-modal').style.display = 'flex';
+}
+
+function addExercise(di) {
+  const name = document.getElementById('new-ex-name').value.trim();
+  const muscle = document.getElementById('new-ex-muscle').value.trim();
+  const sets = parseInt(document.getElementById('new-ex-sets').value) || 3;
+  const reps = document.getElementById('new-ex-reps').value.trim() || '8–12';
+  const pause = document.getElementById('new-ex-pause').value.trim() || '90 Sek';
+  if (!name) return;
+
+  const newEx = { name, muscle, sets, reps, pause, alternatives: [] };
+  DAYS[di].exercises.push(newEx);
+  if (editDraft) editDraft[di].exercises.push({ ...newEx });
+
+  // Also add to catalog if not already there
+  addToCatalog(name, muscle);
+
+  renderDay();
+}
+
+function addToCatalog(name, muscle) {
+  // Find best matching catalog key by muscle label
+  const key = Object.entries(CATALOG).find(([k, cat]) =>
+    cat.label.toLowerCase() === muscle.toLowerCase() ||
+    muscle.toLowerCase().includes(cat.label.toLowerCase())
+  )?.[0];
+
+  if (key && !CATALOG[key].exercises.includes(name)) {
+    CATALOG[key].exercises.push(name);
+  } else if (!key) {
+    // Add to a custom category or the closest match – default to brust
+    const fallback = Object.keys(CATALOG)[0];
+    if (!CATALOG[fallback].exercises.includes(name)) {
+      CATALOG[fallback].exercises.push(name);
+    }
+  }
+}
+
+function deleteEditExercise(di, ei) {
+  if (DAYS[di].exercises.length <= 1) return; // mindestens eine Übung behalten
+  DAYS[di].exercises.splice(ei, 1);
+  if (editDraft) editDraft[di].exercises.splice(ei, 1);
+  renderDay();
+}
+
+function renderEditDay() {
+  const day = DAYS[currentDay];
+  const di = currentDay;
+  let html = `
+    <div class="edit-mode-bar">
+      <span class="edit-mode-label">✏ Bearbeitungsmodus — ${day.type}</span>
+      <div style="display:flex;gap:8px">
+        <button class="edit-discard-btn" onclick="toggleEditMode()">Abbrechen</button>
+        <button class="edit-save-btn" onclick="saveCustomPlan()">Plan speichern</button>
+      </div>
+    </div>
+  `;
+  day.exercises.forEach((ex, ei) => {
+    html += `
+      <div class="edit-card">
+        <div class="edit-card-header">
+          <span class="edit-ex-num">${String(ei+1).padStart(2,'0')}</span>
+          <div style="flex:1">
+            <div class="edit-ex-name">${ex.name}</div>
+            <div style="font-size:10px;font-family:var(--mono);color:var(--muted);margin-top:2px">${ex.muscle}</div>
+          </div>
+          <button class="edit-swap-btn" onclick="openEditCatalog(${di},${ei})">⇄ Tauschen</button>
+          <button class="edit-swap-btn" style="color:var(--red);border-color:rgba(232,96,96,0.3);margin-left:4px" onclick="deleteEditExercise(${di},${ei})">✕</button>
+        </div>
+        <div class="edit-fields">
+          <div class="edit-field">
+            <label>Sätze</label>
+            <input type="number" id="edit-sets-${di}-${ei}" value="${ex.sets}" min="1" max="8">
+          </div>
+          <div class="edit-field">
+            <label>Wdh.</label>
+            <input type="text" id="edit-reps-${di}-${ei}" value="${ex.reps}">
+          </div>
+          <div class="edit-field">
+            <label>Pause</label>
+            <input type="text" id="edit-pause-${di}-${ei}" value="${ex.pause}">
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  // New exercise form
+  html += `
+    <div class="edit-new-ex">
+      <div class="edit-new-ex-title">+ Neue Übung hinzufügen</div>
+      <div class="edit-new-ex-fields">
+        <div class="edit-field" style="grid-column:1/-1">
+          <label>Übungsname</label>
+          <input type="text" id="new-ex-name" placeholder="z.B. Hammercurl einarmig">
+        </div>
+        <div class="edit-field" style="grid-column:1/-1">
+          <label>Muskelgruppe</label>
+          <select id="new-ex-muscle" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:8px;border-radius:4px;width:100%;outline:none;">
+            ${Object.entries(CATALOG).map(([k, cat]) => `<option value="${cat.label}">${cat.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="edit-field">
+          <label>Sätze</label>
+          <input type="number" id="new-ex-sets" value="3" min="1" max="8">
+        </div>
+        <div class="edit-field">
+          <label>Wdh.</label>
+          <input type="text" id="new-ex-reps" placeholder="8–12">
+        </div>
+        <div class="edit-field">
+          <label>Pause</label>
+          <input type="text" id="new-ex-pause" placeholder="90 Sek">
+        </div>
+      </div>
+      <button class="edit-save-btn" style="width:100%;margin-top:8px" onclick="addExercise(${di})">+ Hinzufügen</button>
+    </div>
+  `;
+
+  document.getElementById('main-content').innerHTML = html;
+  document.getElementById('main-content').style.paddingBottom = '80px';
+}
+// ─────────────────────────────────────────────────────────────
+
 function renderNav() {
   const nav = document.getElementById('day-nav');
   nav.innerHTML = DAYS.map((d,i) => `
@@ -824,6 +1111,7 @@ function renderNav() {
 }
 
 function renderDay() {
+  if (editMode) { renderEditDay(); return; }
   const day = DAYS[currentDay];
   loadSessionData();
   const date = activeDateStr();
