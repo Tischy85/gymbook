@@ -172,6 +172,7 @@
   #timer-skip-btn:hover { border-color: var(--muted); color: var(--text); }
 
   .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
+  @keyframes prPop { 0%{opacity:0;transform:translateX(-50%) scale(0.8)} 100%{opacity:1;transform:translateX(-50%) scale(1)} }
   .delete-session-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px; opacity: 0.4; transition: opacity 0.15s; }
   .delete-session-btn:hover { opacity: 1; }
   .progress-dots { display: flex; gap: 3px; margin-top: 4px; }
@@ -304,6 +305,7 @@
   <div class="header-left">
     <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
     <p id="today-date">— — —</p>
+    <p id="next-training" style="font-family:monospace;font-size:9px;color:var(--muted2);margin-top:1px;letter-spacing:0.03em"></p>
   </div>
   <div class="header-right">
     <button class="edit-plan-btn-new" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
@@ -1167,6 +1169,8 @@ function renderDay() {
   const date = activeDateStr();
   const isBackEntry = date !== todayStr();
   document.getElementById('today-date').textContent = `${day.label} · ${formatDate(date)}`;
+  const nextEl = document.getElementById('next-training');
+  if (nextEl) nextEl.textContent = getNextTrainingDay() || '';
 
   let html = `
     <div class="session-meta">
@@ -1185,7 +1189,7 @@ function renderDay() {
     const swappedName = swappedExercises[ei] || null;
     const displayName = swappedName || ex.name;
     const lastEntry = getLastEntryByName(day.id, displayName) || getLastEntry(day.id, ei);
-    const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5);
+    const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5, day.id, displayName);
 
     // Suggestion label
     let suggLabel = '';
@@ -1347,19 +1351,68 @@ function parseRepRange(repsStr) {
   return { low: single, high: single };
 }
 
-function calcWeightSuggestion(lastSets, repsTarget, step) {
+function getLastEntriesByName(dayId, exerciseName, count) {
+  const date = activeDateStr();
+  const keys = storageGetAllKeys()
+    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date))
+    .sort().reverse().slice(0, count);
+  return keys.map(k => {
+    const raw = storageGet(k);
+    if (!raw) return null;
+    const sets = raw.sets || raw;
+    const swapped = raw.swapped || {};
+    const day = DAYS.find(d => d.id === dayId);
+    if (!day) return null;
+    for (let ei = 0; ei < day.exercises.length; ei++) {
+      const slotName = swapped[ei] || day.exercises[ei].name;
+      if (slotName === exerciseName && sets[ei]?.sets?.length) return sets[ei].sets;
+    }
+    return null;
+  }).filter(Boolean);
+}
+
+function calcWeightSuggestion(lastSets, repsTarget, step, dayId, exerciseName) {
   if (!lastSets || !lastSets.length) return null;
   const { high } = parseRepRange(repsTarget);
-  const logged = lastSets.filter(s => s.weight && s.reps);
-  if (!logged.length) return null;
-  const allExceeded = logged.every(s => parseInt(s.reps) > high);
-  const anyExceeded = logged.some(s => parseInt(s.reps) > high);
-  const baseWeight = parseFloat(logged[logged.length - 1].weight);
-  if (isNaN(baseWeight) || baseWeight <= 0) return null;
   const inc = step || 2.5;
-  const halfInc = inc / 2;
+
+  // Get rolling average from last 3 sessions if available
+  let baseWeight = 0;
+  let allExceeded = false;
+  let anyExceeded = false;
+
+  if (dayId && exerciseName) {
+    const recent = getLastEntriesByName(dayId, exerciseName, 3);
+    if (recent.length >= 2) {
+      const avgWeights = recent.map(sets => {
+        const logged = sets.filter(s => s.weight);
+        if (!logged.length) return 0;
+        return parseFloat(logged[logged.length - 1].weight) || 0;
+      }).filter(w => w > 0);
+      if (avgWeights.length) {
+        baseWeight = avgWeights.reduce((a, b) => a + b, 0) / avgWeights.length;
+        // Round to nearest step
+        baseWeight = Math.round(baseWeight / inc) * inc;
+      }
+      // Check if most recent session exceeded
+      const latestLogged = recent[0].filter(s => s.weight && s.reps);
+      allExceeded = latestLogged.length > 0 && latestLogged.every(s => parseInt(s.reps) > high);
+      anyExceeded = latestLogged.some(s => parseInt(s.reps) > high);
+    }
+  }
+
+  // Fallback to last session only
+  if (!baseWeight) {
+    const logged = lastSets.filter(s => s.weight && s.reps);
+    if (!logged.length) return null;
+    allExceeded = logged.every(s => parseInt(s.reps) > high);
+    anyExceeded = logged.some(s => parseInt(s.reps) > high);
+    baseWeight = parseFloat(logged[logged.length - 1].weight);
+    if (isNaN(baseWeight) || baseWeight <= 0) return null;
+  }
+
   if (allExceeded) return { weight: baseWeight + inc, reason: 'all', prevWeight: baseWeight };
-  if (anyExceeded) return { weight: baseWeight + halfInc, reason: 'some', prevWeight: baseWeight };
+  if (anyExceeded) return { weight: baseWeight + (inc / 2), reason: 'some', prevWeight: baseWeight };
   return { weight: baseWeight, reason: 'same', prevWeight: baseWeight };
 }
 
@@ -1567,6 +1620,60 @@ function deleteSession() {
   setStatus('Einheit gelöscht', false);
 }
 
+function getPersonalRecord(exerciseName) {
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':'); return p.length === 3 && !['customplan','customcatalog','pausesettings'].includes(p[1]);
+  });
+  let best = 0;
+  allKeys.forEach(k => {
+    const raw = storageGet(k);
+    if (!raw) return;
+    const sets = raw.sets || raw;
+    const swapped = raw.swapped || {};
+    DAYS.forEach((day, di) => {
+      day.exercises.forEach((ex, ei) => {
+        const name = swapped[ei] || ex.name;
+        if (name !== exerciseName) return;
+        const exSets = sets[ei]?.sets || [];
+        exSets.forEach(s => {
+          const w = parseFloat(s.weight);
+          if (!isNaN(w) && w > best) best = w;
+        });
+      });
+    });
+  });
+  return best;
+}
+
+function showPRCelebration(exerciseName, weight) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#c9a84c;color:#090909;font-family:monospace;font-size:13px;font-weight:600;padding:10px 20px;border-radius:20px;z-index:999;white-space:nowrap;animation:prPop 0.3s ease`;
+  el.textContent = `🏆 Neuer Rekord! ${weight} kg`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+function getNextTrainingDay() {
+  const dayOrder = { upper: 0, push: 2, pull: 4, legs: 6 }; // Mon=0, Wed=2, Fri=4, Sat=5
+  const weekdayMap = { upper: 1, push: 3, pull: 5, legs: 6 }; // JS: Sun=0, Mon=1...
+  const now = new Date();
+  const todayWeekday = now.getDay();
+
+  let best = null;
+  let bestDiff = 8;
+  DAYS.forEach(day => {
+    const target = weekdayMap[day.id];
+    let diff = (target - todayWeekday + 7) % 7;
+    if (diff === 0) diff = 7; // not today
+    if (diff < bestDiff) { bestDiff = diff; best = { day, diff }; }
+  });
+  if (!best) return null;
+  const next = new Date(now);
+  next.setDate(now.getDate() + best.diff);
+  const weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  return `Nächstes Training: ${weekdays[next.getDay()]}, ${best.day.type}`;
+}
+
 function toggleDone(ei, s) {
   collectInputValues();
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
@@ -1579,9 +1686,20 @@ function toggleDone(ei, s) {
   btn.classList.toggle('checked', done);
   if(w) w.classList.toggle('done', done);
   if(r) r.classList.toggle('done', done);
+
+  // PR check
+  if (done) {
+    const weight = parseFloat(sessionData[ei].sets[s].weight);
+    if (!isNaN(weight) && weight > 0) {
+      const ex = DAYS[currentDay].exercises[ei];
+      const displayName = swappedExercises[ei] || ex.name;
+      const pr = getPersonalRecord(displayName);
+      if (weight > pr) showPRCelebration(displayName, weight);
+    }
+  }
+
   autoSave();
   updateTrainingEnd();
-  // Start pause timer when set is checked
   if (done) {
     const ex = DAYS[currentDay].exercises[ei];
     const swappedName = swappedExercises[ei] || null;
