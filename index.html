@@ -1164,15 +1164,34 @@ function renderDay() {
       <div class="swap-panel" id="swap-panel-${ei}" style="display:none"></div>
     `;
 
-    // Muscle color accent based on catalog category
+    // Muscle color accent based on catalog category – partial match
     const muscleColor = (() => {
-      const name = displayName;
+      const nameLower = displayName.toLowerCase();
+      const muscleLower = ex.muscle.toLowerCase();
+
+      // Check catalog first with partial match
       for (const [key, cat] of Object.entries(CATALOG)) {
-        if (cat.exercises.includes(name)) {
-          const colors = { brust: 'var(--push)', ruecken: 'var(--pull)', schulter: 'var(--upper)', bizeps: 'var(--pull)', trizeps: 'var(--push)', beine: 'var(--legs)', bauch: 'var(--accent)' };
+        if (cat.exercises.some(e => nameLower.includes(e.toLowerCase()) || e.toLowerCase().includes(nameLower))) {
+          const colors = {
+            brust:   '#e87f7f',  // Rot
+            trizeps: '#e8a060',  // Orange/Koralle
+            ruecken: '#7fb8e8',  // Blau
+            bizeps:  '#5dcaa5',  // Türkis
+            schulter:'#9b7fe8',  // Lila
+            beine:   '#e8b87f',  // Orange warm
+            bauch:   '#c9a84c'   // Gold
+          };
           return colors[key] || 'var(--muted2)';
         }
       }
+      // Fallback via muscle field
+      if (muscleLower.includes('trizeps')) return '#e8a060';
+      if (muscleLower.includes('bizeps') || muscleLower.includes('brachialis')) return '#5dcaa5';
+      if (muscleLower.includes('brust')) return '#e87f7f';
+      if (muscleLower.includes('rücken') || muscleLower.includes('lat') || muscleLower.includes('mittelrücken')) return '#7fb8e8';
+      if (muscleLower.includes('schulter')) return '#9b7fe8';
+      if (muscleLower.includes('bein') || muscleLower.includes('waden') || muscleLower.includes('gluteus') || muscleLower.includes('hamstring')) return '#e8b87f';
+      if (muscleLower.includes('bauch')) return '#c9a84c';
       return 'var(--muted2)';
     })();
 
