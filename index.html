@@ -376,6 +376,10 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="skip-modal" style="display:none" onclick="if(event.target===this)closeSkipModal()">
+  <div class="modal" id="skip-modal-content"></div>
+</div>
+
 <div class="modal-overlay" id="catalog-modal" style="display:none" onclick="if(event.target===this)closeCatalog()">
   <div class="modal catalog-modal-inner" id="catalog-inner"></div>
 </div>
@@ -690,6 +694,73 @@ function getLastEntry(dayId, exIndex) {
   if (!sets[exIndex]) return null;
   return sets[exIndex].sets;
 }
+
+// ── SKIP EXERCISE ─────────────────────────────────────────────
+const SKIP_REASONS = [
+  { icon: '🏋️', label: 'Gerät belegt' },
+  { icon: '😓', label: 'Zu erschöpft' },
+  { icon: '🤕', label: 'Schmerzen / Verletzung' },
+  { icon: '⏱', label: 'Keine Zeit' },
+  { icon: '✏️', label: 'Eigener Grund' },
+];
+
+let skipTargetEi = null;
+
+function openSkipModal(ei) {
+  skipTargetEi = ei;
+  const ex = DAYS[currentDay].exercises[ei];
+  const displayName = swappedExercises[ei] || ex.name;
+  const html = `
+    <button class="modal-close" onclick="closeSkipModal()">×</button>
+    <h2>Übung überspringen</h2>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:8px 0 16px">${displayName}</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${SKIP_REASONS.map((r, i) => i < 4 ? `
+        <button onclick="skipExercise(${ei}, '${r.icon} ${r.label}')" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:13px;padding:13px 16px;border-radius:8px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">${r.icon}</span>${r.label}
+        </button>
+      ` : `
+        <div style="display:flex;gap:8px;margin-top:2px">
+          <input type="text" id="skip-custom-reason" placeholder="Eigener Grund eingeben…" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:12px;border-radius:8px;flex:1;outline:none">
+          <button onclick="skipExercise(${ei}, document.getElementById('skip-custom-reason').value || '✏️ Eigener Grund')" style="background:var(--accent);color:#090909;border:none;font-family:var(--mono);font-size:12px;font-weight:600;padding:12px 16px;border-radius:8px;cursor:pointer;white-space:nowrap">✕ Skip</button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  document.getElementById('skip-modal-content').innerHTML = html;
+  document.getElementById('skip-modal').style.display = 'flex';
+}
+
+function closeSkipModal() {
+  document.getElementById('skip-modal').style.display = 'none';
+}
+
+function skipExercise(ei, reason) {
+  if (!sessionData[ei]) sessionData[ei] = { sets: [] };
+  sessionData[ei].skipped = { reason, timestamp: Date.now() };
+  closeSkipModal();
+  autoSave();
+  renderDay();
+  setTimeout(() => {
+    const body = document.getElementById(`exbody-${ei}`);
+    const chev = document.getElementById(`chev-${ei}`);
+    if (body) body.classList.add('open');
+    if (chev) chev.classList.add('open');
+  }, 10);
+}
+
+function unskipExercise(ei) {
+  if (sessionData[ei]) delete sessionData[ei].skipped;
+  autoSave();
+  renderDay();
+  setTimeout(() => {
+    const body = document.getElementById(`exbody-${ei}`);
+    const chev = document.getElementById(`chev-${ei}`);
+    if (body) body.classList.add('open');
+    if (chev) chev.classList.add('open');
+  }, 10);
+}
+// ─────────────────────────────────────────────────────────────
 
 function adjustReps(ei, s, delta) {
   const input = document.getElementById(`r-${ei}-${s}`);
@@ -1252,9 +1323,6 @@ function renderDay() {
         <button class="expand-all-btn" onclick="toggleAllExercises(false)" style="font-size:16px;padding:2px 12px">−</button>
       </div>
     </div>
-    <div class="note-wrap">
-      <textarea class="session-note-input" id="session-note" placeholder="Notiz zur Einheit… (optional)" oninput="saveNote()">${savedNote}</textarea>
-    </div>
   `;
 
   day.exercises.forEach((ex, ei) => {
@@ -1318,35 +1386,53 @@ function renderDay() {
       ? sessionData[ei].activeSets
       : ex.sets;
 
-    // Progress dots
     const totalSets = activeSets;
     const doneSets = (sessionData[ei]?.sets || []).filter(s => s.done).length;
-    const progressDots = Array.from({length: totalSets}, (_, i) =>
-      `<div class="progress-dot ${i < doneSets ? 'done' : ''}"></div>`
-    ).join('');
+
+    // Skip state
+    const skipData = sessionData[ei]?.skipped || null;
+
+    // Progress dots – show X if skipped
+    const progressDots = skipData
+      ? `<span style="font-family:var(--mono);font-size:10px;color:var(--red)">✕ Übersprungen</span>`
+      : Array.from({length: totalSets}, (_, i) =>
+          `<div class="progress-dot ${i < doneSets ? 'done' : ''}"></div>`
+        ).join('');
 
     html += `
-      <div class="exercise-card" style="border-left:3px solid ${muscleColor};border-radius:0 8px 8px 0">
+      <div class="exercise-card" style="border-left:3px solid ${skipData ? 'var(--red)' : muscleColor};border-radius:0 8px 8px 0;${skipData ? 'opacity:0.6' : ''}">
         <div class="exercise-header" onclick="toggleEx(${ei}, this)">
           <span class="ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
             <div class="ex-name">${displayName}${swappedName ? ' <span style="font-size:10px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</div>
             <div class="ex-meta">${ex.muscle} · ${ex.sets}×${ex.reps} · Pause ${ex.pause}</div>
             <div class="progress-dots">${progressDots}</div>
+            ${skipData ? `<div style="font-family:var(--mono);font-size:9px;color:var(--red);margin-top:2px">${skipData.reason}</div>` : ''}
           </div>
           ${suggLabel}
           ${timerExerciseName === displayName && document.getElementById('timer-overlay')?.style.display !== 'none' ? '<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-left:4px">⏱</span>' : ''}
           <span class="ex-chevron" id="chev-${ei}">▶</span>
         </div>
         <div class="exercise-body" id="exbody-${ei}">
-          <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:6px">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:6px;flex-wrap:wrap">
             <button class="swap-btn ${swappedName ? 'active' : ''}" onclick="event.stopPropagation();openCatalog(${ei})">⇄ Übung tauschen</button>
             ${swappedName ? `<button class="swap-btn" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();resetSwap(${ei})">↺ Zurücksetzen</button>` : ''}
+            ${skipData
+              ? `<button class="swap-btn" style="color:var(--accent);border-color:var(--accent)" onclick="event.stopPropagation();unskipExercise(${ei})">↩ Wiederholen</button>`
+              : `<button class="swap-btn" style="color:var(--red);border-color:rgba(232,96,96,0.3)" onclick="event.stopPropagation();openSkipModal(${ei})">✕ Überspringen</button>`
+            }
           </div>
           ${swapPanelHtml}
+          ${skipData ? `
+            <div style="background:rgba(232,96,96,0.06);border:0.5px solid rgba(232,96,96,0.2);border-radius:6px;padding:12px;text-align:center">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--red)">Übung übersprungen</div>
+              <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px">${skipData.reason}</div>
+            </div>
+          ` : `
           <div class="sets-header">
             <span>Satz</span><span>Gewicht</span><span></span><span>Wdh.</span><span></span><span></span>
           </div>
+          `}
     `;
 
     // Ensure sessionData has enough set slots
@@ -1357,6 +1443,7 @@ function renderDay() {
 
     const step = ex.step || 2.5;
 
+    if (!skipData) {
     for (let s = 0; s < activeSets; s++) {
       const setData = sessionData[ei].sets[s] || { weight: '', reps: '', done: false };
       const suggWeight = suggestion ? suggestion.weight : '';
@@ -1378,8 +1465,10 @@ function renderDay() {
         </div>
       `;
     }
+    } // end !skipData for sets
 
     // + / - set buttons
+    if (!skipData) {
     html += `
       <div class="set-adjust-row">
         ${activeSets > 1 ? `<button class="set-adj-btn set-adj-minus" onclick="adjustSets(${ei}, -1)">− Satz entfernen</button>` : ''}
@@ -1387,6 +1476,7 @@ function renderDay() {
         ${activeSets !== ex.sets ? `<button class="set-adj-btn set-adj-reset" onclick="adjustSets(${ei}, 0)">↺ ${ex.sets} Sätze (Plan)</button>` : ''}
       </div>
     `;
+    } // end !skipData
 
     if (ex.note) {
       html += `<div class="ex-note ${ex.warn?'warning':''}">${ex.note}</div>`;
@@ -1418,7 +1508,17 @@ function renderDay() {
   });
 
   document.getElementById('main-content').innerHTML = html;
-  document.getElementById('main-content').style.paddingBottom = '80px';
+  document.getElementById('main-content').style.paddingBottom = '120px';
+
+  // Note field at bottom
+  const noteWrap = document.createElement('div');
+  noteWrap.className = 'note-wrap';
+  noteWrap.style.marginTop = '8px';
+  noteWrap.innerHTML = `
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Notiz zur Einheit</div>
+    <textarea class="session-note-input" id="session-note" placeholder="Wie war das Training heute? (optional)" oninput="saveNote()">${savedNote}</textarea>
+  `;
+  document.getElementById('main-content').appendChild(noteWrap);
 
   const statusEl = document.getElementById('save-status');
   if (statusEl) {
@@ -2204,6 +2304,43 @@ function showProgress() {
         </div>
       `).join('')}
     </div>` : '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:20px 0">Noch keine Gewichte eingetragen</div>'}
+    ${(() => {
+      // Skip stats
+      const skipStats = {};
+      allKeys.forEach(k => {
+        const raw = storageGet(k);
+        if (!raw) return;
+        const sets = raw.sets || raw;
+        DAYS.forEach(day => {
+          day.exercises.forEach((ex, ei) => {
+            const skip = sets[ei]?.skipped;
+            if (skip) {
+              const name = (raw.swapped || {})[ei] || ex.name;
+              if (!skipStats[name]) skipStats[name] = {};
+              const r = skip.reason || 'Kein Grund';
+              skipStats[name][r] = (skipStats[name][r] || 0) + 1;
+            }
+          });
+        });
+      });
+      if (!Object.keys(skipStats).length) return '';
+      return `
+        <div style="margin-top:16px">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Übersprungene Übungen</div>
+          ${Object.entries(skipStats).map(([name, reasons]) => {
+            const total = Object.values(reasons).reduce((a,b) => a+b, 0);
+            const topReason = Object.entries(reasons).sort((a,b) => b[1]-a[1])[0];
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)">
+              <div>
+                <div style="font-size:12px;color:var(--text)">${name}</div>
+                <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px">${topReason[0]}</div>
+              </div>
+              <span style="font-family:var(--mono);font-size:12px;color:var(--red)">${total}×</span>
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    })()}
   `;
   document.getElementById('modal-content').innerHTML = html;
   document.getElementById('modal').style.display = 'flex';
