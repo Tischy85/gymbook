@@ -1177,9 +1177,21 @@ function renderDay() {
       <div class="swap-panel" id="swap-panel-${ei}" style="display:none"></div>
     `;
 
+    // Muscle color accent based on catalog category
+    const muscleColor = (() => {
+      const name = displayName;
+      for (const [key, cat] of Object.entries(CATALOG)) {
+        if (cat.exercises.includes(name)) {
+          const colors = { brust: 'var(--push)', ruecken: 'var(--pull)', schulter: 'var(--upper)', bizeps: 'var(--pull)', trizeps: 'var(--push)', beine: 'var(--legs)', bauch: 'var(--accent)' };
+          return colors[key] || 'var(--muted2)';
+        }
+      }
+      return 'var(--muted2)';
+    })();
+
     html += `
-      <div class="exercise-card">
-        <div class="exercise-header" onclick="toggleEx(${ei})">
+      <div class="exercise-card" style="border-left:3px solid ${muscleColor}">
+        <div class="exercise-header" onclick="toggleEx(${ei}, this)">
           <span class="ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
             <div class="ex-name">${displayName}${swappedName ? ' <span style="font-size:10px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</div>
@@ -1294,12 +1306,17 @@ function calcWeightSuggestion(lastSets, repsTarget) {
   return { weight: baseWeight, reason: 'same', prevWeight: baseWeight };
 }
 
-function toggleEx(ei) {
+function toggleEx(ei, headerEl) {
   const body = document.getElementById(`exbody-${ei}`);
   const chev = document.getElementById(`chev-${ei}`);
   const open = body.classList.contains('open');
   body.classList.toggle('open', !open);
   chev.classList.toggle('open', !open);
+  if (!open && headerEl) {
+    setTimeout(() => {
+      headerEl.closest('.exercise-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }
 }
 
 // ── TIMER ─────────────────────────────────────────────────────
@@ -1662,21 +1679,20 @@ function adjustTimer(delta) {
 
 // ── 5. PROGRESS OVERVIEW ─────────────────────────────────────
 function showProgress() {
-  const allKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:') && k.split(':').length === 3 && !k.includes('customplan') && !k.includes('customcatalog') && !k.includes('pausesettings'));
-
-  // Count sessions per day
+  const allKeys = storageGetAllKeys().filter(k => {
+    const parts = k.split(':');
+    return parts.length === 3 && !['customplan','customcatalog','pausesettings'].includes(parts[1]);
+  });
   const sessionsByDay = {};
   DAYS.forEach(d => { sessionsByDay[d.id] = 0; });
   allKeys.forEach(k => {
     const parts = k.split(':');
     if (sessionsByDay[parts[1]] !== undefined) sessionsByDay[parts[1]]++;
   });
-
   const totalSessions = allKeys.length;
 
-  // Find best lifts per exercise
-  const bestLifts = {};
-  allKeys.forEach(k => {
+  const weightHistory = {};
+  allKeys.sort().forEach(k => {
     const raw = storageGet(k);
     if (!raw) return;
     const sets = raw.sets || raw;
@@ -1687,58 +1703,101 @@ function showProgress() {
     day.exercises.forEach((ex, ei) => {
       const name = swapped[ei] || ex.name;
       const exSets = sets[ei]?.sets || [];
-      exSets.forEach(s => {
-        const w = parseFloat(s.weight);
-        if (!isNaN(w) && w > 0) {
-          if (!bestLifts[name] || w > bestLifts[name]) bestLifts[name] = w;
-        }
-      });
+      const maxW = Math.max(...exSets.map(s => parseFloat(s.weight) || 0));
+      if (maxW > 0) {
+        if (!weightHistory[name]) weightHistory[name] = [];
+        weightHistory[name].push({ weight: maxW });
+      }
     });
   });
 
-  // Recent 8 sessions for activity chart
-  const recentKeys = allKeys.sort().reverse().slice(0, 8).reverse();
+  const bestLifts = {};
+  Object.entries(weightHistory).forEach(([name, entries]) => {
+    bestLifts[name] = Math.max(...entries.map(e => e.weight));
+  });
+
+  const sessionDates = [...new Set(allKeys.map(k => k.split(':')[2]))].sort().reverse();
+  let streak = 0;
+  let checkDate = new Date(); checkDate.setHours(0,0,0,0);
+  for (const date of sessionDates) {
+    const d = new Date(date);
+    const diff = Math.round((checkDate - d) / 86400000);
+    if (diff <= 7) { streak++; checkDate = d; } else break;
+  }
+
+  const progressExercises = Object.entries(weightHistory)
+    .filter(([, e]) => e.length >= 2)
+    .map(([name, entries]) => {
+      const first = entries[0].weight;
+      const last = entries[entries.length-1].weight;
+      return { name, diff: last - first, last6: entries.slice(-6), first, last };
+    })
+    .sort((a,b) => b.diff - a.diff).slice(0, 5);
 
   let html = `
     <button class="modal-close" onclick="closeModal()">×</button>
     <h2>Fortschritt</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0">
-      <div style="background:var(--bg3);border-radius:8px;padding:14px;text-align:center">
-        <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--accent)">${totalSessions}</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.06em">Einheiten gesamt</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:16px 0">
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display);font-size:26px;font-weight:700;color:var(--accent)">${totalSessions}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Einheiten</div>
       </div>
-      <div style="background:var(--bg3);border-radius:8px;padding:14px;text-align:center">
-        <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--accent)">${Object.values(sessionsByDay).reduce((a,b) => a + b, 0)}</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;text-transform:uppercase;letter-spacing:0.06em">Trainingstage</div>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display);font-size:26px;font-weight:700;color:var(--accent)">${streak}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Streak</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display);font-size:26px;font-weight:700;color:var(--accent)">${Object.keys(bestLifts).length}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Übungen</div>
       </div>
     </div>
-
     <div style="margin-bottom:16px">
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
       ${DAYS.map(d => `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <span style="font-family:var(--mono);font-size:11px;color:var(--muted);width:90px">${d.type}</span>
-          <div style="flex:1;background:var(--bg3);border-radius:4px;height:6px;overflow:hidden">
-            <div style="height:100%;background:var(--accent);border-radius:4px;width:${totalSessions > 0 ? Math.round((sessionsByDay[d.id] / Math.max(...Object.values(sessionsByDay), 1)) * 100) : 0}%;transition:width 0.3s"></div>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:80px;flex-shrink:0">${d.type}</span>
+          <div style="flex:1;background:var(--bg3);border-radius:4px;height:5px;overflow:hidden">
+            <div style="height:100%;background:var(--accent);border-radius:4px;width:${totalSessions > 0 ? Math.round((sessionsByDay[d.id] / Math.max(...Object.values(sessionsByDay), 1)) * 100) : 0}%"></div>
           </div>
-          <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:20px;text-align:right">${sessionsByDay[d.id]}</span>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:16px;text-align:right">${sessionsByDay[d.id]}</span>
         </div>
       `).join('')}
     </div>
-
+    ${progressExercises.length > 0 ? `
+    <div style="margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Gewichtsentwicklung</div>
+      ${progressExercises.map(ex => `
+        <div style="margin-bottom:10px;background:var(--bg3);border-radius:8px;padding:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-size:12px;font-weight:500;color:var(--text)">${ex.name}</span>
+            <span style="font-family:var(--mono);font-size:11px;color:${ex.diff > 0 ? 'var(--accent)' : 'var(--muted)'}">${ex.diff > 0 ? '+' : ''}${ex.diff} kg</span>
+          </div>
+          <div style="display:flex;align-items:flex-end;gap:3px;height:28px">
+            ${ex.last6.map((e, i) => {
+              const maxW = Math.max(...ex.last6.map(x => x.weight));
+              const pct = maxW > 0 ? Math.round((e.weight / maxW) * 100) : 0;
+              const isLast = i === ex.last6.length - 1;
+              return `<div style="flex:1;background:${isLast ? 'var(--accent)' : 'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px"></div>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:4px">
+            <span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">${ex.first} kg</span>
+            <span style="font-family:var(--mono);font-size:9px;color:var(--accent)">${ex.last} kg</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : ''}
     ${Object.keys(bestLifts).length > 0 ? `
     <div>
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Bestleistungen</div>
-      ${Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0, 10).map(([name, weight]) => `
+      ${Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0,10).map(([name, weight]) => `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)">
           <span style="font-size:12px;color:var(--text)">${name}</span>
           <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${weight} kg</span>
         </div>
       `).join('')}
-    </div>
-    ` : '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:20px 0">Noch keine Gewichte eingetragen</div>'}
+    </div>` : '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:20px 0">Noch keine Gewichte eingetragen</div>'}
   `;
-
   document.getElementById('modal-content').innerHTML = html;
   document.getElementById('modal').style.display = 'flex';
 }
