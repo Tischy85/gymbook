@@ -498,8 +498,7 @@ async function cloudPull() {
     loadPauseSettings();
     setStatus('☁ Synchronisiert', true);
     renderNav();
-    renderDay();
-  } catch(e) {
+    renderDay();  } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
   }
@@ -563,8 +562,12 @@ function storageGetAllKeys() {
 function setStatus(msg, ok) {
   const trySet = () => {
     const el = document.getElementById('save-status');
-    if (el) { el.textContent = msg; el.className = ok ? 'save-status saved' : 'save-status'; }
-    else { setTimeout(trySet, 100); }
+    if (el) {
+      el.textContent = msg;
+      el.className = ok ? 'save-status saved' : 'save-status';
+    } else {
+      setTimeout(trySet, 100);
+    }
   };
   trySet();
 }
@@ -1337,10 +1340,16 @@ function renderDay() {
   document.getElementById('main-content').innerHTML = html;
   document.getElementById('main-content').style.paddingBottom = '80px';
 
-  const status = document.getElementById('save-status');
-  const saved = storageGet(getKey(day.id, date));
-  status.textContent = saved ? `Gespeichert — ${formatDate(date)}` : 'Nicht gespeichert';
-  status.className = saved ? 'save-status saved' : 'save-status';
+  const statusEl = document.getElementById('save-status');
+  if (statusEl) {
+    const saved = storageGet(getKey(day.id, date));
+    const currentText = statusEl.textContent;
+    // Don't overwrite cloud status messages
+    if (!currentText.includes('☁') && !currentText.includes('⚠')) {
+      statusEl.textContent = saved ? `Gespeichert — ${formatDate(date)}` : 'Nicht gespeichert';
+      statusEl.className = saved ? 'save-status saved' : 'save-status';
+    }
+  }
   updateTrainingEnd();
 }
 
