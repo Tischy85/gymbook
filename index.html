@@ -180,6 +180,10 @@
   .progress-dot.done { background: var(--accent); }
   .progress-bar-wrap { height: 2px; background: var(--bg4); border-radius: 1px; margin-top: 5px; overflow: hidden; }
   .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 1px; transition: width 0.3s; }
+  .quick-btns { display: flex; flex-direction: column; gap: 2px; }
+  .quick-btns button { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 500; width: 28px; height: 21px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
+  .quick-btns button:hover { background: var(--accent); color: #090909; border-color: var(--accent); }
+  .quick-btns button:active { transform: scale(0.92); }
   .edit-mode-bar { background: rgba(201,168,76,0.08); border: 0.5px solid rgba(201,168,76,0.25); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .edit-mode-label { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.06em; }
   .edit-card { background: var(--bg2); border: 1px solid rgba(201,168,76,0.2); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
@@ -671,6 +675,30 @@ function getLastEntry(dayId, exIndex) {
   const sets = raw.sets || raw;
   if (!sets[exIndex]) return null;
   return sets[exIndex].sets;
+}
+
+function adjustReps(ei, s, delta) {
+  const input = document.getElementById(`r-${ei}-${s}`);
+  if (!input) return;
+  const current = parseInt(input.value) || parseInt(input.placeholder) || 0;
+  const newVal = Math.max(0, current + delta);
+  input.value = newVal;
+  if (!sessionData[ei]) sessionData[ei] = { sets: [] };
+  if (!sessionData[ei].sets[s]) sessionData[ei].sets[s] = { weight: '', reps: '', done: false };
+  sessionData[ei].sets[s].reps = String(newVal);
+  autoSave();
+}
+
+function adjustWeight(ei, s, delta) {
+  const input = document.getElementById(`w-${ei}-${s}`);
+  if (!input) return;
+  const current = parseFloat(input.value) || parseFloat(input.placeholder) || 0;
+  const newVal = Math.max(0, Math.round((current + delta) * 100) / 100);
+  input.value = newVal;
+  if (!sessionData[ei]) sessionData[ei] = { sets: [] };
+  if (!sessionData[ei].sets[s]) sessionData[ei].sets[s] = { weight: '', reps: '', done: false };
+  sessionData[ei].sets[s].weight = String(newVal);
+  autoSave();
 }
 
 function adjustSets(ei, delta) {
@@ -1274,7 +1302,7 @@ function renderDay() {
           </div>
           ${swapPanelHtml}
           <div class="sets-header">
-            <span>Satz</span><span>Gewicht (kg)</span><span>Wdh.</span><span>Ziel</span><span></span>
+            <span>Satz</span><span>Gewicht</span><span></span><span>Wdh.</span><span></span><span></span>
           </div>
     `;
 
@@ -1284,16 +1312,25 @@ function renderDay() {
       sessionData[ei].sets.push({ weight: '', reps: '', done: false });
     }
 
+    const step = ex.step || 2.5;
+
     for (let s = 0; s < activeSets; s++) {
       const setData = sessionData[ei].sets[s] || { weight: '', reps: '', done: false };
       const suggWeight = suggestion ? suggestion.weight : '';
       const placeholder = setData.weight ? '' : (suggWeight ? `${suggWeight}` : (lastEntry ? lastEntry[s]?.weight || '—' : '—'));
       html += `
-        <div class="set-row" id="set-row-${ei}-${s}">
+        <div class="set-row" id="set-row-${ei}-${s}" style="grid-template-columns:22px 1fr auto 1fr auto 34px">
           <span class="set-num">${s+1}</span>
-          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="0.5" min="0" placeholder="${placeholder}" value="${setData.weight}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${placeholder}" value="${setData.weight}" oninput="markDirty()" onchange="autoSave()">
+          <div class="quick-btns">
+            <button onclick="adjustWeight(${ei},${s},${step})">+</button>
+            <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
+          </div>
           <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${ex.reps.split(/[–\-]/)[0]}" value="${setData.reps}" oninput="markDirty()" onchange="autoSave()">
-          <span class="set-input" style="cursor:default;color:var(--muted2);font-size:11px">${ex.reps}</span>
+          <div class="quick-btns">
+            <button onclick="adjustReps(${ei},${s},1)">+</button>
+            <button onclick="adjustReps(${ei},${s},-1)">−</button>
+          </div>
           <button class="check-btn ${setData.done?'checked':''}" id="chk-${ei}-${s}" onclick="toggleDone(${ei},${s})">✓</button>
         </div>
       `;
@@ -1948,14 +1985,17 @@ function showProgress() {
   const totalSessions = allKeys.length;
 
   const weightHistory = {};
+  const volumeHistory = {}; // date -> total volume
   allKeys.sort().forEach(k => {
     const raw = storageGet(k);
     if (!raw) return;
     const sets = raw.sets || raw;
     const swapped = raw.swapped || {};
     const dayId = k.split(':')[1];
+    const date = k.split(':')[2];
     const day = DAYS.find(d => d.id === dayId);
     if (!day) return;
+    let dayVolume = 0;
     day.exercises.forEach((ex, ei) => {
       const name = swapped[ei] || ex.name;
       const exSets = sets[ei]?.sets || [];
@@ -1964,7 +2004,14 @@ function showProgress() {
         if (!weightHistory[name]) weightHistory[name] = [];
         weightHistory[name].push({ weight: maxW });
       }
+      // Volume = sets × reps × weight
+      exSets.forEach(s => {
+        const w = parseFloat(s.weight) || 0;
+        const r = parseInt(s.reps) || 0;
+        if (w > 0 && r > 0) dayVolume += w * r;
+      });
     });
+    if (dayVolume > 0) volumeHistory[date] = (volumeHistory[date] || 0) + dayVolume;
   });
 
   const bestLifts = {};
@@ -1990,10 +2037,38 @@ function showProgress() {
     })
     .sort((a,b) => b.diff - a.diff).slice(0, 5);
 
+  // Missed session detection
+  const expectedDays = { upper: 1, push: 3, pull: 5 }; // Mon=1, Wed=3, Fri=5
+  const today = new Date();
+  const missedWarnings = [];
+  Object.entries(expectedDays).forEach(([dayId, weekday]) => {
+    const lastMonday = new Date(today);
+    lastMonday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    const expectedDate = new Date(lastMonday);
+    expectedDate.setDate(lastMonday.getDate() + weekday - 1);
+    if (expectedDate < today) {
+      const key = getKey(dayId, expectedDate.toISOString().slice(0,10));
+      if (!storageGet(key)) {
+        const day = DAYS.find(d => d.id === dayId);
+        const weekdays = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+        missedWarnings.push(`${weekdays[expectedDate.getDay()]} ${formatDate(expectedDate.toISOString().slice(0,10))}: ${day?.type}`);
+      }
+    }
+  });
+
+  // Volume last 8 sessions
+  const volumeEntries = Object.entries(volumeHistory).sort().slice(-8);
+  const maxVolume = Math.max(...volumeEntries.map(([,v]) => v), 1);
+
   let html = `
     <button class="modal-close" onclick="closeModal()">×</button>
     <h2>Fortschritt</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:16px 0">
+    ${missedWarnings.length > 0 ? `
+    <div style="background:rgba(232,96,96,0.08);border:0.5px solid rgba(232,96,96,0.3);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--red);font-weight:600;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em">⚠ Ausgelassene Einheiten</div>
+      ${missedWarnings.map(w => `<div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${w}</div>`).join('')}
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:0 0 16px">
       <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
         <div style="font-family:var(--display);font-size:26px;font-weight:700;color:var(--accent)">${totalSessions}</div>
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Einheiten</div>
@@ -2007,6 +2082,21 @@ function showProgress() {
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Übungen</div>
       </div>
     </div>
+    ${volumeEntries.length >= 2 ? `
+    <div style="margin-bottom:16px;background:var(--bg3);border-radius:8px;padding:12px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Trainingsvolumen (letzte ${volumeEntries.length} Einheiten)</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:40px">
+        ${volumeEntries.map(([date, vol], i) => {
+          const pct = Math.round((vol / maxVolume) * 100);
+          const isLast = i === volumeEntries.length - 1;
+          return `<div style="flex:1;background:${isLast ? 'var(--accent)' : 'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px" title="${Math.round(vol).toLocaleString()} kg Gesamtvolumen"></div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:4px">
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">${formatDate(volumeEntries[0][0])}</span>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--accent)">${Math.round(volumeEntries[volumeEntries.length-1][1]).toLocaleString()} kg</span>
+      </div>
+    </div>` : ''}
     <div style="margin-bottom:16px">
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
       ${DAYS.map(d => `
