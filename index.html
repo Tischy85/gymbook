@@ -243,7 +243,7 @@
   }
 
   /* ── NEUE HEADER/NAV STYLES ── */
-  .header { padding: env(safe-area-inset-top, 12px) 20px 0; padding-top: max(env(safe-area-inset-top), 16px); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .header { padding: 20px 20px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 0.5px solid var(--border); }
   .header-left h1 { font-family: var(--display); font-size: 26px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; color: var(--text); }
   .header-left h1 span { color: var(--accent); }
   .header-left p { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 4px; letter-spacing: 0.03em; }
@@ -289,12 +289,13 @@
 
   /* Main content */
   .main { padding: 14px 20px 120px; }
+</style>
 </head>
 <body>
 
 <div class="header">
   <div class="header-left">
-    <h1>GYM<span>BOOK</span></h1>
+    <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
     <p id="today-date">— — —</p>
   </div>
   <div class="header-right">
