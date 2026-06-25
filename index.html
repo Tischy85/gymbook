@@ -171,7 +171,14 @@
   #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 13px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
   #timer-skip-btn:hover { border-color: var(--muted); color: var(--text); }
 
-  /* EDIT MODE */
+  .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
+  .delete-session-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px; opacity: 0.4; transition: opacity 0.15s; }
+  .delete-session-btn:hover { opacity: 1; }
+  .progress-dots { display: flex; gap: 3px; margin-top: 4px; }
+  .progress-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bg4); transition: background 0.2s; }
+  .progress-dot.done { background: var(--accent); }
+  .progress-bar-wrap { height: 2px; background: var(--bg4); border-radius: 1px; margin-top: 5px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 1px; transition: width 0.3s; }
   .edit-mode-bar { background: rgba(201,168,76,0.08); border: 0.5px solid rgba(201,168,76,0.25); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .edit-mode-label { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.06em; }
   .edit-card { background: var(--bg2); border: 1px solid rgba(201,168,76,0.2); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
@@ -318,6 +325,8 @@
 
 <div class="save-bar" id="save-bar">
   <span class="save-status" id="save-status">Nicht gespeichert</span>
+  <span class="training-end" id="training-end" style="display:none"></span>
+  <button class="delete-session-btn" id="delete-session-btn" onclick="deleteSession()" style="display:none">🗑</button>
 </div>
 
 <!-- TIMER OVERLAY -->
@@ -1195,16 +1204,28 @@ function renderDay() {
       return 'var(--muted2)';
     })();
 
+    // Determine active set count (plan default or user-adjusted)
+    const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
+      ? sessionData[ei].activeSets
+      : ex.sets;
+
+    // Progress dots
+    const totalSets = activeSets;
+    const doneSets = (sessionData[ei]?.sets || []).filter(s => s.done).length;
+    const progressDots = Array.from({length: totalSets}, (_, i) =>
+      `<div class="progress-dot ${i < doneSets ? 'done' : ''}"></div>`
+    ).join('');
+
     html += `
-      <div class="exercise-card" style="border-left:3px solid ${muscleColor}">
+      <div class="exercise-card" style="border-left:3px solid ${muscleColor};border-radius:0 8px 8px 0">
         <div class="exercise-header" onclick="toggleEx(${ei}, this)">
           <span class="ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
             <div class="ex-name">${displayName}${swappedName ? ' <span style="font-size:10px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</div>
             <div class="ex-meta">${ex.muscle} · ${ex.sets}×${ex.reps} · Pause ${ex.pause}</div>
+            <div class="progress-dots">${progressDots}</div>
           </div>
           ${suggLabel}
-          ${anyDone ? '<span style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:6px">✓</span>' : ''}
           <span class="ex-chevron" id="chev-${ei}">▶</span>
         </div>
         <div class="exercise-body" id="exbody-${ei}">
@@ -1217,11 +1238,6 @@ function renderDay() {
             <span>Satz</span><span>Gewicht (kg)</span><span>Wdh.</span><span>Ziel</span><span></span>
           </div>
     `;
-
-    // Determine active set count (plan default or user-adjusted)
-    const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
-      ? sessionData[ei].activeSets
-      : ex.sets;
 
     // Ensure sessionData has enough set slots
     if (!sessionData[ei]) sessionData[ei] = { sets: [], activeSets: ex.sets };
@@ -1289,6 +1305,7 @@ function renderDay() {
   const saved = storageGet(getKey(day.id, date));
   status.textContent = saved ? `Gespeichert — ${formatDate(date)}` : 'Nicht gespeichert';
   status.className = saved ? 'save-status saved' : 'save-status';
+  updateTrainingEnd();
 }
 
 function parseRepRange(repsStr) {
@@ -1470,6 +1487,52 @@ document.addEventListener('visibilitychange', () => {
 });
 // ─────────────────────────────────────────────────────────────
 
+function calcTrainingEnd() {
+  const day = DAYS[currentDay];
+  let remainingSeconds = 0;
+  day.exercises.forEach((ex, ei) => {
+    const sd = sessionData[ei] || { sets: [], activeSets: null };
+    const numSets = sd.activeSets != null ? sd.activeSets : ex.sets;
+    const doneSets = (sd.sets || []).filter(s => s.done).length;
+    const remaining = Math.max(0, numSets - doneSets);
+    const pauseSec = defaultPauseOverrides[ex.name] || parsePause(ex.pause);
+    const setTimeSec = 45;
+    remainingSeconds += remaining * (setTimeSec + pauseSec);
+  });
+  if (remainingSeconds <= 0) return null;
+  const end = new Date(Date.now() + remainingSeconds * 1000);
+  return `Fertig ~${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')} Uhr`;
+}
+
+function updateTrainingEnd() {
+  const el = document.getElementById('training-end');
+  const delBtn = document.getElementById('delete-session-btn');
+  if (!el) return;
+  const result = calcTrainingEnd();
+  if (result) {
+    el.textContent = result;
+    el.style.display = 'inline';
+  } else {
+    el.style.display = 'none';
+  }
+  // Show delete button if session has data
+  const hasData = Object.values(sessionData).some(s => s.sets?.some(x => x.weight || x.done));
+  if (delBtn) delBtn.style.display = hasData ? 'inline' : 'none';
+}
+
+function deleteSession() {
+  const day = DAYS[currentDay];
+  const date = activeDateStr();
+  if (!confirm(`Einheit vom ${formatDate(date)} wirklich löschen?`)) return;
+  const key = getKey(day.id, date);
+  delete cloudData[key];
+  localStorage.removeItem(key);
+  cloudPush();
+  loadSessionData();
+  renderDay();
+  setStatus('Einheit gelöscht', false);
+}
+
 function toggleDone(ei, s) {
   collectInputValues();
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
@@ -1483,6 +1546,7 @@ function toggleDone(ei, s) {
   if(w) w.classList.toggle('done', done);
   if(r) r.classList.toggle('done', done);
   autoSave();
+  updateTrainingEnd();
   // Start pause timer when set is checked
   if (done) {
     const ex = DAYS[currentDay].exercises[ei];
@@ -1807,6 +1871,31 @@ function showProgress() {
   document.getElementById('modal-content').innerHTML = html;
   document.getElementById('modal').style.display = 'flex';
 }
+
+// ── OFFLINE / SERVICE WORKER ──────────────────────────────────
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'gymbook-v1';
+    const ASSETS = [location.href];
+    self.addEventListener('install', e => e.waitUntil(
+      caches.open(CACHE).then(c => c.addAll(ASSETS))
+    ));
+    self.addEventListener('fetch', e => {
+      if (e.request.url.includes('jsonbin.io')) return;
+      e.respondWith(
+        caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+          return res;
+        }))
+      );
+    });
+  `;
+  const blob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl).catch(() => {});
+}
+// ─────────────────────────────────────────────────────────────
 
 // Init
 renderNav();
