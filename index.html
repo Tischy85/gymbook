@@ -300,7 +300,6 @@
   </div>
   <div class="header-right">
     <button class="edit-plan-btn-new" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
-    <button class="save-btn-top" onclick="saveSession()">Speichern</button>
     <button class="menu-btn" onclick="toggleMenu()">⋯</button>
   </div>
 </div>
@@ -319,7 +318,6 @@
 
 <div class="save-bar" id="save-bar">
   <span class="save-status" id="save-status">Nicht gespeichert</span>
-  <button class="save-bar-main-btn" id="save-bar-btn" onclick="saveSession()">Einheit speichern</button>
 </div>
 
 <!-- TIMER OVERLAY -->
@@ -886,25 +884,14 @@ let catalogEditMode = false;
 function toggleEditMode() {
   editMode = !editMode;
   const btn = document.getElementById('edit-plan-btn');
-  const saveBar = document.getElementById('save-bar-btn');
   if (editMode) {
     editDraft = JSON.parse(JSON.stringify(DAYS));
     btn.classList.add('active');
     btn.textContent = '× Abbrechen';
-    saveBar.textContent = '💾 Plan speichern';
-    saveBar.onclick = saveCustomPlan;
-    saveBar.style.background = 'var(--bg3)';
-    saveBar.style.color = 'var(--accent)';
-    saveBar.style.border = '0.5px solid var(--accent)';
   } else {
     editDraft = null;
     btn.classList.remove('active');
     btn.textContent = '✏ Plan';
-    saveBar.textContent = 'Einheit speichern';
-    saveBar.onclick = saveSession;
-    saveBar.style.background = '';
-    saveBar.style.color = '';
-    saveBar.style.border = '';
   }
   renderDay();
 }
