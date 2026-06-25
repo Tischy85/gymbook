@@ -35,44 +35,19 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
-
-  /* HEADER */
-  .header { padding: 32px 24px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; border-bottom: 0.5px solid var(--border); padding-bottom: 20px; }
-  .header-left h1 { font-family: var(--display); font-size: 32px; font-weight: 900; letter-spacing: -1px; line-height: 1; color: var(--text); }
-  .header-left h1 span { color: var(--accent); }
-  .header-left p { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 6px; letter-spacing: 0.04em; }
-  .header-right { display: flex; gap: 6px; align-items: center; }
-  .btn { background: none; border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 10px; padding: 7px 13px; border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap; letter-spacing: 0.03em; }
+  .btn { background: none; border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 10px; padding: 7px 13px; border-radius: 4px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
   .btn:hover { border-color: var(--accent); color: var(--accent); }
-  .btn-accent { background: var(--accent); color: #090909; border-color: var(--accent); font-weight: 500; }
-  .btn-accent:hover { background: var(--accent3); border-color: var(--accent3); color: #090909; }
-
-  /* NAV */
-  .nav { display: flex; gap: 2px; padding: 16px 24px 0; overflow-x: auto; scrollbar-width: none; }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-family: var(--sans); font-size: 12px; font-weight: 500; padding: 8px 16px; cursor: pointer; transition: all 0.15s; white-space: nowrap; display: flex; align-items: center; gap: 7px; border-radius: 0; }
   .nav-btn .dot { width: 5px; height: 5px; border-radius: 50%; }
-  .nav-btn:hover { color: var(--text); }
-  .nav-btn.active-upper { color: var(--upper); border-bottom-color: var(--upper); }
-  .nav-btn.active-legs   { color: var(--legs);  border-bottom-color: var(--legs); }
-  .nav-btn.active-push   { color: var(--push);  border-bottom-color: var(--push); }
-  .nav-btn.active-pull   { color: var(--pull);  border-bottom-color: var(--pull); }
   .dot-upper { background: var(--upper); }
   .dot-legs  { background: var(--legs); }
   .dot-push  { background: var(--push); }
   .dot-pull  { background: var(--pull); }
 
-  /* MAIN */
-  .main { padding: 20px 24px 40px; }
-
-  /* SESSION META */
-  .session-meta { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
-  .session-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 10px; border-radius: 3px; font-family: var(--mono); }
-  .label-upper { color: var(--upper); background: rgba(155,127,232,0.08); border: 0.5px solid rgba(155,127,232,0.2); }
-  .label-legs  { color: var(--legs);  background: rgba(232,168,127,0.08); border: 0.5px solid rgba(232,168,127,0.2); }
-  .label-push  { color: var(--push);  background: rgba(232,127,127,0.08); border: 0.5px solid rgba(232,127,127,0.2); }
-  .label-pull  { color: var(--pull);  background: rgba(127,184,232,0.08); border: 0.5px solid rgba(127,184,232,0.2); }
-  .session-note { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-left: auto; letter-spacing: 0.03em; }
+  /* SESSION META – label only */
+  .label-upper { color: var(--upper); }
+  .label-legs  { color: var(--legs); }
+  .label-push  { color: var(--push); }
+  .label-pull  { color: var(--pull); }
 
   /* DATE PICKER */
   .date-picker-wrap { display: flex; align-items: center; gap: 8px; }
@@ -150,11 +125,6 @@
   .set-adj-reset { border-color: var(--border2); color: var(--muted); }
   .set-adj-reset:hover { border-color: var(--muted); color: var(--text); }
 
-  /* SAVE BAR */
-  .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; z-index: 100; }
-  .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; }
-  .save-status.saved { color: var(--accent); }
-
   /* MODAL */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; backdrop-filter: blur(4px); }
   .modal { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 10px; padding: 24px; width: 100%; max-width: 460px; max-height: 80vh; overflow-y: auto; }
@@ -166,52 +136,18 @@
   .history-full-sets { font-family: var(--mono); font-size: 11px; color: var(--muted); line-height: 1.8; }
   .empty-state { text-align: center; padding: 40px 20px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
 
-  /* MOBILE – iPhone 16 Pro optimiert */
+  /* MOBILE */
   @media (max-width: 480px) {
     body { -webkit-tap-highlight-color: transparent; }
-
-    .header { flex-direction: column; align-items: flex-start; padding: 52px 20px 16px; gap: 10px; }
-    .header-left h1 { font-size: 30px; }
-    .header-right { width: 100%; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; }
-    .btn { padding: 10px 8px; font-size: 10px; text-align: center; border-radius: 6px; }
-    .btn-accent { padding: 10px 14px; }
-
-    .nav { padding: 0 20px; gap: 0; border-bottom: 0.5px solid var(--border); }
-    .nav-btn { padding: 12px 14px; font-size: 12px; }
-
-    .main { padding: 16px 20px 100px; }
-
-    .session-meta { gap: 8px; margin-bottom: 16px; }
-    .session-label { font-size: 10px; padding: 5px 10px; }
-    .session-note { font-size: 10px; }
-
-    .exercise-card { border-radius: 10px; margin-bottom: 8px; }
-    .exercise-header { padding: 16px 16px; min-height: 60px; }
-    .ex-name { font-size: 14px; }
-    .ex-meta { font-size: 10px; margin-top: 3px; }
-    .exercise-body { padding: 0 14px 16px; }
-
     .sets-header { grid-template-columns: 22px 1fr 1fr 1fr 38px; gap: 6px; }
     .set-row     { grid-template-columns: 22px 1fr 1fr 1fr 38px; gap: 6px; margin-bottom: 8px; }
     .set-input { font-size: 15px; padding: 11px 8px; border-radius: 6px; }
     .check-btn { width: 38px; height: 44px; border-radius: 6px; font-size: 15px; }
-
-    .save-bar { padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); }
-    .save-bar .btn-accent { padding: 12px 20px; font-size: 11px; }
-
     .sugg-badge { font-size: 9px; padding: 2px 7px; }
-
     .swap-btn { padding: 5px 10px; font-size: 10px; min-height: 32px; }
-    .swap-option { padding: 10px 0; }
-    .swap-option-name { font-size: 13px; }
-    .swap-option-btn { padding: 6px 14px; min-height: 34px; font-size: 10px; }
-
     .set-adj-btn { padding: 8px 14px; min-height: 36px; font-size: 10px; }
-
-    .modal { border-radius: 14px; padding: 20px; max-height: 85vh; }
     .modal-overlay { align-items: flex-end; padding: 0; }
     .modal { border-bottom-left-radius: 0; border-bottom-right-radius: 0; max-height: 88vh; }
-
     .date-picker { font-size: 12px; padding: 6px 4px; }
   }
 
@@ -306,11 +242,53 @@
     .cat-ex-name { font-size: 14px; }
   }
 
-  /* Safe area für Homescreen-Modus */
-  @supports (padding-bottom: env(safe-area-inset-bottom)) {
-    .save-bar { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-  }
-</style>
+  /* ── NEUE HEADER/NAV STYLES ── */
+  .header { padding: env(safe-area-inset-top, 12px) 20px 0; padding-top: max(env(safe-area-inset-top), 16px); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .header-left h1 { font-family: var(--display); font-size: 26px; font-weight: 900; letter-spacing: -0.5px; line-height: 1; color: var(--text); }
+  .header-left h1 span { color: var(--accent); }
+  .header-left p { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 4px; letter-spacing: 0.03em; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+
+  /* Menu button */
+  .menu-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--text); font-size: 18px; width: 38px; height: 38px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+  .menu-btn:hover { border-color: var(--accent); }
+  .edit-plan-btn-new { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 0 14px; height: 38px; border-radius: 10px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .edit-plan-btn-new.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .save-btn-top { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 0 18px; height: 38px; border-radius: 10px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+  .save-btn-top:hover { background: var(--accent3); }
+
+  /* Dropdown menu */
+  .menu-dropdown { position: absolute; top: 60px; right: 20px; background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 12px; padding: 6px; z-index: 150; min-width: 180px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  .menu-item { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 8px; font-family: var(--mono); font-size: 12px; color: var(--text); cursor: pointer; transition: background 0.1s; border: none; background: none; width: 100%; text-align: left; }
+  .menu-item:hover { background: var(--bg3); }
+  .menu-item-icon { font-size: 15px; width: 20px; text-align: center; }
+  .menu-divider { height: 0.5px; background: var(--border); margin: 4px 0; }
+
+  /* Nav chips */
+  .nav { display: flex; gap: 6px; padding: 14px 20px 0; overflow-x: auto; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-btn { background: var(--bg3); border: 0.5px solid var(--border); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 7px 14px; border-radius: 20px; cursor: pointer; transition: all 0.15s; white-space: nowrap; letter-spacing: 0.02em; }
+  .nav-btn:hover { color: var(--text); border-color: var(--border2); }
+  .nav-btn.active-upper { background: rgba(155,127,232,0.12); border-color: var(--upper); color: var(--upper); }
+  .nav-btn.active-push   { background: rgba(232,127,127,0.12); border-color: var(--push);  color: var(--push); }
+  .nav-btn.active-pull   { background: rgba(127,184,232,0.12); border-color: var(--pull);  color: var(--pull); }
+  .nav-btn.active-legs   { background: rgba(232,168,127,0.12); border-color: var(--legs);  color: var(--legs); }
+
+  /* Session meta */
+  .session-meta { display: flex; align-items: center; gap: 10px; padding: 14px 20px 0; flex-wrap: nowrap; }
+  .session-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
+  .session-date-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
+  .session-note { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-left: auto; white-space: nowrap; }
+
+  /* Save bar – full width */
+  .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 20px calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; z-index: 100; }
+  .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; flex: 1; }
+  .save-status.saved { color: var(--accent); }
+  .save-bar-main-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 600; padding: 13px 0; border-radius: 10px; cursor: pointer; transition: background 0.15s; flex: 2; }
+  .save-bar-main-btn:hover { background: var(--accent3); }
+
+  /* Main content */
+  .main { padding: 14px 20px 120px; }
 </head>
 <body>
 
@@ -320,13 +298,19 @@
     <p id="today-date">— — —</p>
   </div>
   <div class="header-right">
-    <button class="btn" onclick="showHistory()">Verlauf</button>
-    <button class="btn" onclick="showProgress()">📈 Fortschritt</button>
-    <button class="btn" onclick="exportData()">↓ Export</button>
-    <label class="btn" style="cursor:pointer">↑ Import<input type="file" accept=".json" onchange="importData(event)" style="display:none"></label>
-    <button class="btn" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
-    <button class="btn btn-accent" onclick="saveSession()">Speichern</button>
+    <button class="edit-plan-btn-new" id="edit-plan-btn" onclick="toggleEditMode()">✏ Plan</button>
+    <button class="save-btn-top" onclick="saveSession()">Speichern</button>
+    <button class="menu-btn" onclick="toggleMenu()">⋯</button>
   </div>
+</div>
+
+<!-- Dropdown Menu -->
+<div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
+  <button class="menu-item" onclick="showHistory();toggleMenu()"><span class="menu-item-icon">📋</span>Verlauf</button>
+  <button class="menu-item" onclick="showProgress();toggleMenu()"><span class="menu-item-icon">📈</span>Fortschritt</button>
+  <div class="menu-divider"></div>
+  <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export</button>
+  <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
 </div>
 
 <div class="nav" id="day-nav"></div>
@@ -334,7 +318,7 @@
 
 <div class="save-bar" id="save-bar">
   <span class="save-status" id="save-status">Nicht gespeichert</span>
-  <button class="btn btn-accent" id="save-bar-btn" onclick="saveSession()">Einheit speichern</button>
+  <button class="save-bar-main-btn" id="save-bar-btn" onclick="saveSession()">Einheit speichern</button>
 </div>
 
 <!-- TIMER OVERLAY -->
@@ -503,7 +487,6 @@ async function cloudPull() {
     loadCustomCatalog();
     loadPauseSettings();
     setStatus('☁ Synchronisiert', true);
-    // Re-render with cloud data
     renderNav();
     renderDay();
   } catch(e) {
@@ -909,12 +892,18 @@ function toggleEditMode() {
     btn.textContent = '× Abbrechen';
     saveBar.textContent = '💾 Plan speichern';
     saveBar.onclick = saveCustomPlan;
+    saveBar.style.background = 'var(--bg3)';
+    saveBar.style.color = 'var(--accent)';
+    saveBar.style.border = '0.5px solid var(--accent)';
   } else {
     editDraft = null;
     btn.classList.remove('active');
     btn.textContent = '✏ Plan';
     saveBar.textContent = 'Einheit speichern';
     saveBar.onclick = saveSession;
+    saveBar.style.background = '';
+    saveBar.style.color = '';
+    saveBar.style.border = '';
   }
   renderDay();
 }
@@ -1153,8 +1142,8 @@ function renderDay() {
 
   let html = `
     <div class="session-meta">
-      <span class="session-label label-${day.color}">${weekdayFromDate(date)}</span>
-      <div class="date-picker-wrap">
+      <span class="session-label">${weekdayFromDate(date)}</span>
+      <div class="session-date-wrap">
         <input type="date" id="session-date-picker" class="date-picker" value="${date}" max="${todayStr()}" onchange="setActiveDate(this.value)">
         ${isBackEntry ? '<span class="back-entry-badge">Nachtrag</span>' : ''}
       </div>
@@ -1281,19 +1270,6 @@ function renderDay() {
   const saved = storageGet(getKey(day.id, date));
   status.textContent = saved ? `Gespeichert — ${formatDate(date)}` : 'Nicht gespeichert';
   status.className = saved ? 'save-status saved' : 'save-status';
-}
-
-function getLastEntry(dayId, exIndex) {
-  const date = activeDateStr();
-  const keys = storageGetAllKeys()
-    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date))
-    .sort().reverse();
-  if (!keys.length) return null;
-  const data = storageGet(keys[0]);
-  if (!data) return null;
-  const sets = data.sets || data;
-  if (!sets[exIndex]) return null;
-  return sets[exIndex].sets;
 }
 
 function parseRepRange(repsStr) {
@@ -1627,6 +1603,17 @@ function hideDayPicker() {
   if (panel) panel.style.display = 'none';
 }
 
+function toggleMenu() {
+  const menu = document.getElementById('menu-dropdown');
+  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+document.addEventListener('click', e => {
+  const menu = document.getElementById('menu-dropdown');
+  if (menu && !menu.contains(e.target) && !e.target.closest('.menu-btn')) {
+    menu.style.display = 'none';
+  }
+});
+
 function closeModal() {
   document.getElementById('modal').style.display = 'none';
 }
@@ -1758,6 +1745,7 @@ function showProgress() {
 // Init
 renderNav();
 renderDay();
+// Cloud lädt im Hintergrund – UI ist sofort sichtbar
 cloudInit();
 </script>
 </body>
