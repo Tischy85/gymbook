@@ -2506,6 +2506,14 @@ function hideDayPicker() {
 let currentTab = 'home';
 
 function switchTab(tab) {
+  // Warn if in edit mode and switching away from training
+  if (editMode && tab !== 'training') {
+    if (!confirm('Du bist noch im Bearbeitungsmodus. Änderungen werden verworfen. Trotzdem wechseln?')) return;
+    editMode = false;
+    editDraft = null;
+    const btn = document.getElementById('edit-plan-btn');
+    if (btn) { btn.classList.remove('active'); btn.textContent = '✏ Plan'; }
+  }
   currentTab = tab;
   document.getElementById('home-page').style.display = tab === 'home' ? 'block' : 'none';
   document.getElementById('training-page').style.display = tab === 'training' ? 'block' : 'none';
@@ -2657,7 +2665,7 @@ function renderStats() {
     </div>
 
     <!-- STATS KACHELN -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:12px;text-align:center">
         <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${completedKeys.length}</div>
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Einheiten</div>
@@ -2671,6 +2679,27 @@ function renderStats() {
         <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Übungen</div>
       </div>
     </div>
+
+    <!-- EINHEITEN PRO TAG -->
+    ${(() => {
+      const sessionsByDay = {};
+      DAYS.forEach(d => { sessionsByDay[d.id] = 0; });
+      completedKeys.forEach(k => { const id = k.split(':')[1]; if (sessionsByDay[id] !== undefined) sessionsByDay[id]++; });
+      const maxD = Math.max(...Object.values(sessionsByDay), 1);
+      const dayColors = { upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f' };
+      return `<div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
+        ${DAYS.map(d => `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:80px;flex-shrink:0">${d.type}</span>
+            <div style="flex:1;background:var(--bg3);border-radius:4px;height:5px;overflow:hidden">
+              <div style="height:100%;background:${dayColors[d.id]||'var(--accent)'};border-radius:4px;width:${Math.round((sessionsByDay[d.id]/maxD)*100)}%"></div>
+            </div>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:16px;text-align:right">${sessionsByDay[d.id]}</span>
+          </div>
+        `).join('')}
+      </div>`;
+    })()}
 
     <!-- VOLUMEN -->
     ${volumeEntries.length >= 2 ? `
@@ -2787,6 +2816,7 @@ function renderHome() {
     const wd = weekdayMap[d.id];
     return wd === todayWd;
   });
+  const todayCompleted = todaySession ? isSessionCompleted(todaySession.id, todayStr()) : false;
 
   // Week stats – only completed sessions
   const weekStart = new Date(now);
@@ -2894,15 +2924,21 @@ function renderHome() {
   document.getElementById('home-content').innerHTML = `
     <div class="home-greeting">
       <div class="home-greeting-title">${greeting}, Marco 👋</div>
-      <div class="home-greeting-sub">Bereit fürs Training?</div>
+      <div class="home-greeting-sub">${todayCompleted ? 'Starkes Training heute! 💪' : 'Bereit fürs Training?'}</div>
     </div>
 
-    ${todaySession ? `
+    ${todaySession && todayCompleted ? `
+    <div class="home-card" style="border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.04)">
+      <div class="home-card-title">✓ Heute abgeschlossen</div>
+      <div class="home-next-type">${todaySession.type}</div>
+      <div class="home-next-day" style="margin-top:4px">${nextDay ? `Nächste Einheit: ${nextDayName} · ${nextDay.type}` : 'Genieß die Erholung!'}</div>
+    </div>
+    ` : todaySession ? `
     <div class="home-card" style="border-color:rgba(201,168,76,0.3);background:rgba(201,168,76,0.05)">
       <div class="home-card-title">Heute auf dem Plan</div>
       <div class="home-next-type">${todaySession.type}</div>
       <div class="home-next-day">${todaySession.duration}</div>
-      <button class="home-start-btn" onclick="switchTab('training')">Training starten →</button>
+      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(todaySession)};switchTab('training')">Training starten →</button>
     </div>
     ` : nextDay ? `
     <div class="home-card">
