@@ -189,6 +189,19 @@
   .quick-btns button { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 500; width: 28px; height: 21px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
   .quick-btns button:hover { background: var(--accent); color: #090909; border-color: var(--accent); }
   .quick-btns button:active { transform: scale(0.92); }
+  /* CALENDAR */
+  .cal-legend { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cal-header-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; margin-bottom: 4px; }
+  .cal-header-cell { font-family: var(--mono); font-size: 10px; color: var(--muted2); text-align: center; padding: 4px 0; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-cell { background: var(--bg3); border-radius: 6px; padding: 5px 3px; min-height: 44px; display: flex; flex-direction: column; align-items: center; }
+  .cal-cell.empty { background: none; }
+  .cal-cell.today { border: 1.5px solid var(--accent); }
+  .cal-cell.has-session { background: var(--bg4); }
+  .cal-cell.past-empty { opacity: 0.35; }
+  .cal-day { font-family: var(--mono); font-size: 11px; color: var(--text); }
+  .cal-cell.today .cal-day { color: var(--accent); font-weight: 600; }
+
   /* WEEK STATS + NOTE */
   .week-stats { display: flex; align-items: center; justify-content: space-between; padding: 8px 20px 0; }
   .week-stat-pills { display: flex; align-items: center; gap: 5px; }
@@ -339,6 +352,7 @@
 <div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
   <button class="menu-item" onclick="showHistory();toggleMenu()"><span class="menu-item-icon">📋</span>Verlauf</button>
   <button class="menu-item" onclick="showProgress();toggleMenu()"><span class="menu-item-icon">📈</span>Fortschritt</button>
+  <button class="menu-item" onclick="showCalendar();toggleMenu()"><span class="menu-item-icon">📅</span>Kalender</button>
   <div class="menu-divider"></div>
   <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
   <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
@@ -1208,8 +1222,9 @@ function renderEditDay() {
   `;
   day.exercises.forEach((ex, ei) => {
     html += `
-      <div class="edit-card">
+      <div class="edit-card" draggable="true" ondragstart="onDragStart(${ei})" ondragover="onDragOver(${ei}, event)" ondragend="onDragEnd()">
         <div class="edit-card-header">
+          <span style="font-size:16px;color:var(--muted2);cursor:grab;padding:0 4px">⠿</span>
           <span class="edit-ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
             <div class="edit-ex-name">${ex.name}</div>
@@ -1744,9 +1759,10 @@ function showTimerNextInfo(ei, s) {
   const labelEl = document.getElementById('timer-next-label');
   const inputsEl = document.getElementById('timer-next-inputs');
 
+  const activeSetsNext = sessionData[nextEi]?.activeSets ?? nextEx.sets;
   labelEl.textContent = isNextExercise
     ? `Nächste Übung: ${nextName}`
-    : `Nächster Satz: ${nextName}`;
+    : `Satz ${nextSet + 1} von ${activeSets}: ${nextName}`;
 
   inputsEl.innerHTML = `
     <div style="text-align:center">
@@ -2266,6 +2282,110 @@ function importData(event) {
 }
 
 
+
+// ── TRAININGSKALENDER ─────────────────────────────────────────
+function showCalendar() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+  const dayNames = ['Mo','Di','Mi','Do','Fr','Sa','So'];
+
+  // Get all session dates this month and last month
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    return p.length === 3 && !['customplan','customcatalog','pausesettings','offlinequeue'].includes(p[1]) && !p[1].startsWith('note') && !p[1].startsWith('binId');
+  });
+
+  const sessionDates = {};
+  allKeys.forEach(k => {
+    const parts = k.split(':');
+    const date = parts[2];
+    const dayId = parts[1];
+    if (!sessionDates[date]) sessionDates[date] = [];
+    sessionDates[date].push(dayId);
+  });
+
+  // Build calendar for current month
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startWeekday = (firstDay.getDay() + 6) % 7; // Mon=0
+
+  const dayColors = { upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f' };
+
+  let cells = '';
+  // Empty cells before first day
+  for (let i = 0; i < startWeekday; i++) {
+    cells += `<div class="cal-cell empty"></div>`;
+  }
+  // Day cells
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = dateStr === todayStr();
+    const sessions = sessionDates[dateStr] || [];
+    const isPast = new Date(dateStr) < new Date(todayStr());
+
+    let dots = sessions.map(id => `<div style="width:5px;height:5px;border-radius:50%;background:${dayColors[id]||'var(--accent)'};flex-shrink:0"></div>`).join('');
+
+    cells += `
+      <div class="cal-cell ${isToday ? 'today' : ''} ${sessions.length ? 'has-session' : ''} ${isPast && !sessions.length ? 'past-empty' : ''}">
+        <span class="cal-day">${d}</span>
+        ${dots ? `<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;margin-top:2px">${dots}</div>` : ''}
+      </div>
+    `;
+  }
+
+  // Stats
+  const thisMonthSessions = Object.entries(sessionDates).filter(([d]) => d.startsWith(`${year}-${String(month+1).padStart(2,'0')}`)).length;
+
+  const html = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>${monthNames[month]} ${year}</h2>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin:6px 0 14px">${thisMonthSessions} Einheiten diesen Monat</div>
+    <div class="cal-legend">
+      ${Object.entries(dayColors).map(([id, color]) => {
+        const day = DAYS.find(d => d.id === id);
+        return `<div style="display:flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:9px;color:var(--muted)">${day?.type||id}</span></div>`;
+      }).join('')}
+    </div>
+    <div class="cal-header-row">
+      ${dayNames.map(d => `<div class="cal-header-cell">${d}</div>`).join('')}
+    </div>
+    <div class="cal-grid">${cells}</div>
+  `;
+
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+}
+// ─────────────────────────────────────────────────────────────
+
+// ── DRAG TO REORDER ───────────────────────────────────────────
+let dragSrcEi = null;
+
+function onDragStart(ei) {
+  dragSrcEi = ei;
+}
+
+function onDragOver(ei, e) {
+  e.preventDefault();
+  if (dragSrcEi === null || dragSrcEi === ei) return;
+  const di = currentDay;
+  const exercises = DAYS[di].exercises;
+  const moved = exercises.splice(dragSrcEi, 1)[0];
+  exercises.splice(ei, 0, moved);
+  if (editDraft) {
+    const draftEx = editDraft[di].exercises;
+    const movedDraft = draftEx.splice(dragSrcEi, 1)[0];
+    draftEx.splice(ei, 0, movedDraft);
+  }
+  dragSrcEi = ei;
+  renderDay();
+}
+
+function onDragEnd() {
+  dragSrcEi = null;
+}
+// ─────────────────────────────────────────────────────────────
 
 function showDayPicker() {
   const panel = document.getElementById('day-picker-panel');
