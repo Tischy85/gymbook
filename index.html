@@ -1071,26 +1071,28 @@ async function saveCustomPlan() {
   // Apply to DAYS
   editDraft.forEach((day, di) => {
     day.exercises.forEach((ex, ei) => {
-      DAYS[di].exercises[ei].name  = ex.name;
+      if (!DAYS[di].exercises[ei]) return;
+      DAYS[di].exercises[ei].name   = ex.name;
       DAYS[di].exercises[ei].muscle = ex.muscle;
-      DAYS[di].exercises[ei].sets  = ex.sets;
-      DAYS[di].exercises[ei].reps  = ex.reps;
-      DAYS[di].exercises[ei].pause = ex.pause;
+      DAYS[di].exercises[ei].sets   = ex.sets;
+      DAYS[di].exercises[ei].reps   = ex.reps;
+      DAYS[di].exercises[ei].pause  = ex.pause;
+      if (ex.step) DAYS[di].exercises[ei].step = ex.step;
     });
   });
   storageSet('gymbook:customplan', JSON.stringify(DAYS));
   saveCustomCatalog();
-  setStatus('Plan gespeichert ✓', true);
+
+  // Exit edit mode cleanly
   editMode = false;
   editDraft = null;
   const btn = document.getElementById('edit-plan-btn');
-  btn.classList.remove('active');
-  btn.textContent = '✏ Plan';
-  const saveBar = document.getElementById('save-bar-btn');
-  saveBar.textContent = 'Einheit speichern';
-  saveBar.onclick = saveSession;
+  if (btn) { btn.classList.remove('active'); btn.textContent = '✏ Plan'; }
+
+  setStatus('Plan gespeichert ✓', true);
   renderNav();
   renderDay();
+  setTimeout(() => setStatus('☁ Synchronisiert', true), 2000);
 }
 
 function loadCustomPlan() {
