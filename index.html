@@ -1964,10 +1964,13 @@ function calcTrainingEnd() {
   let remainingSeconds = 0;
   day.exercises.forEach((ex, ei) => {
     const sd = sessionData[ei] || { sets: [], activeSets: null };
+    if (sd.skipped) return;
     const numSets = sd.activeSets != null ? sd.activeSets : ex.sets;
     const doneSets = (sd.sets || []).filter(s => s.done).length;
     const remaining = Math.max(0, numSets - doneSets);
-    const pauseSec = defaultPauseOverrides[ex.name] || parsePause(ex.pause);
+    const displayName = swappedExercises[ei] || ex.name;
+    // Use saved pause override if available, else plan default
+    const pauseSec = defaultPauseOverrides[displayName] || parsePause(ex.pause);
     const setTimeSec = 45;
     remainingSeconds += remaining * (setTimeSec + pauseSec);
   });
