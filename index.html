@@ -154,22 +154,26 @@
 
   /* TIMER */
   #timer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 300; display: flex; align-items: flex-end; justify-content: center; padding: 0; backdrop-filter: blur(6px); }
-  #timer-box { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 20px 20px 0 0; padding: 24px 24px calc(24px + env(safe-area-inset-bottom)); width: 100%; max-width: 420px; }
-  #timer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-  #timer-label { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
-  #timer-header button { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0; }
-  #timer-ring-wrap { position: relative; width: 140px; height: 140px; margin: 0 auto 20px; }
-  #timer-svg { width: 140px; height: 140px; transform: rotate(-90deg); }
+  #timer-box { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 20px 20px 0 0; padding: 18px 20px calc(18px + env(safe-area-inset-bottom)); width: 100%; max-width: 420px; }
+  #timer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #timer-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  #timer-header button { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; line-height: 1; padding: 0; }
+  #timer-ring-wrap { position: relative; width: 110px; height: 110px; margin: 0 auto 12px; }
+  #timer-svg { width: 110px; height: 110px; transform: rotate(-90deg); }
   #timer-track { fill: none; stroke: var(--bg4); stroke-width: 6; }
   #timer-progress { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 327; stroke-dashoffset: 0; transition: stroke-dashoffset 1s linear; }
-  #timer-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 42px; font-weight: 700; color: var(--text); letter-spacing: -2px; }
-  #timer-adjust { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
-  #timer-adjust button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 8px 14px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+  #timer-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 34px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
+  #timer-next-info { margin-bottom: 10px; text-align: center; }
+  #timer-next-label { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  #timer-next-inputs input { background: #111114; border: 1px solid rgba(255,255,255,0.22); color: #f5f2eb; font-family: var(--mono); font-size: 15px; padding: 8px; border-radius: 6px; width: 72px; text-align: center; outline: none; }
+  #timer-next-inputs input:focus { border-color: var(--accent); }
+  #timer-adjust { display: flex; gap: 6px; justify-content: center; margin-bottom: 10px; }
+  #timer-adjust button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 7px 12px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
   #timer-adjust button:hover { border-color: var(--accent); color: var(--accent); }
   #timer-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #timer-pause-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 500; padding: 13px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
+  #timer-pause-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 500; padding: 12px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
   #timer-pause-btn:hover { background: var(--accent3); }
-  #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 13px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+  #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
   #timer-skip-btn:hover { border-color: var(--muted); color: var(--text); }
 
   .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
@@ -364,11 +368,15 @@
       </svg>
       <div id="timer-time">0:00</div>
     </div>
+    <div id="timer-next-info" style="display:none">
+      <div id="timer-next-label"></div>
+      <div id="timer-next-inputs" style="display:flex;gap:8px;justify-content:center;margin-top:6px"></div>
+    </div>
     <div id="timer-adjust">
-      <button onclick="adjustTimer(-15)">−15s</button>
       <button onclick="adjustTimer(-30)">−30s</button>
-      <button onclick="adjustTimer(30)">+30s</button>
+      <button onclick="adjustTimer(-15)">−15s</button>
       <button onclick="adjustTimer(15)">+15s</button>
+      <button onclick="adjustTimer(30)">+30s</button>
     </div>
     <div id="timer-btns">
       <button id="timer-pause-btn" onclick="toggleTimerPause()">Pause</button>
@@ -1669,7 +1677,10 @@ function getRemainingSeconds() {
   return Math.max(0, timerTotal - elapsed);
 }
 
-async function startTimer(seconds, exerciseName) {
+let timerCurrentEi = null; // exercise index that started the timer
+let timerCurrentS = null;  // set index
+
+async function startTimer(seconds, exerciseName, ei, s) {
   clearInterval(timerInterval);
   clearTimeout(notificationTimeout);
   timerTotal = seconds;
@@ -1677,18 +1688,79 @@ async function startTimer(seconds, exerciseName) {
   timerPaused = false;
   timerPausedAt = null;
   timerExerciseName = exerciseName;
+  timerCurrentEi = ei;
+  timerCurrentS = s;
 
-  // Request notification permission on first use
   await requestNotificationPermission();
   scheduleNotification(seconds, exerciseName);
 
-  document.getElementById('timer-label').textContent = `Pause · ${exerciseName}`;
+  document.getElementById('timer-label').textContent = `PAUSE · ${exerciseName.toUpperCase()}`;
   document.getElementById('timer-pause-btn').textContent = 'Pause';
   document.getElementById('timer-overlay').style.display = 'flex';
   document.getElementById('timer-progress').style.stroke = 'var(--accent)';
 
+  // Show next set/exercise info
+  showTimerNextInfo(ei, s);
+
   updateTimerDisplay();
-  timerInterval = setInterval(timerTick, 250); // faster tick for smooth display
+  timerInterval = setInterval(timerTick, 250);
+}
+
+function showTimerNextInfo(ei, s) {
+  const day = DAYS[currentDay];
+  const ex = day.exercises[ei];
+  if (!ex) return;
+
+  const activeSets = sessionData[ei]?.activeSets ?? ex.sets;
+  const nextS = s + 1;
+  let nextEi = ei;
+  let nextSet = nextS;
+  let isNextExercise = false;
+
+  if (nextS >= activeSets) {
+    nextEi = ei + 1;
+    nextSet = 0;
+    isNextExercise = true;
+  }
+
+  const nextEx = day.exercises[nextEi];
+  if (!nextEx) {
+    document.getElementById('timer-next-info').style.display = 'none';
+    return;
+  }
+
+  const nextName = swappedExercises[nextEi] || nextEx.name;
+  const lastEntry = getLastEntryByName(day.id, nextName) || getLastEntry(day.id, nextEi);
+  const suggestion = calcWeightSuggestion(lastEntry, nextEx.reps, nextEx.step || 2.5, day.id, nextName);
+
+  // Get current weight/reps from last set of this exercise as default
+  const prevSetData = sessionData[nextEi]?.sets?.[nextSet - 1] || sessionData[nextEi]?.sets?.[0];
+  const defaultWeight = prevSetData?.weight || (suggestion ? suggestion.weight : '');
+  const defaultReps = prevSetData?.reps || nextEx.reps.split(/[–\-]/)[0];
+
+  const infoEl = document.getElementById('timer-next-info');
+  const labelEl = document.getElementById('timer-next-label');
+  const inputsEl = document.getElementById('timer-next-inputs');
+
+  labelEl.textContent = isNextExercise
+    ? `Nächste Übung: ${nextName}`
+    : `Nächster Satz: ${nextName}`;
+
+  inputsEl.innerHTML = `
+    <div style="text-align:center">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-bottom:3px">GEWICHT</div>
+      <input type="number" id="timer-next-weight" value="${defaultWeight}" placeholder="${suggestion?.weight || '—'}" style="width:72px">
+    </div>
+    <div style="text-align:center">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-bottom:3px">WDH.</div>
+      <input type="number" id="timer-next-reps" value="${defaultReps}" placeholder="${nextEx.reps.split(/[–\-]/)[0]}" style="width:60px">
+    </div>
+  `;
+
+  // Store next exercise ref for applying on close
+  infoEl.dataset.nextEi = nextEi;
+  infoEl.dataset.nextS = nextSet;
+  infoEl.style.display = 'block';
 }
 
 function timerTick() {
@@ -1743,10 +1815,37 @@ function toggleTimerPause() {
 function closeTimer() {
   clearInterval(timerInterval);
   clearTimeout(notificationTimeout);
+
+  // Apply pre-filled next set values if present
+  const infoEl = document.getElementById('timer-next-info');
+  if (infoEl && infoEl.style.display !== 'none') {
+    const nextEi = parseInt(infoEl.dataset.nextEi);
+    const nextS = parseInt(infoEl.dataset.nextS);
+    const weightEl = document.getElementById('timer-next-weight');
+    const repsEl = document.getElementById('timer-next-reps');
+    if (!isNaN(nextEi) && !isNaN(nextS) && weightEl && repsEl) {
+      if (!sessionData[nextEi]) sessionData[nextEi] = { sets: [] };
+      while (sessionData[nextEi].sets.length <= nextS) {
+        sessionData[nextEi].sets.push({ weight: '', reps: '', done: false });
+      }
+      if (weightEl.value) sessionData[nextEi].sets[nextS].weight = weightEl.value;
+      if (repsEl.value) sessionData[nextEi].sets[nextS].reps = repsEl.value;
+      autoSave();
+      // Update visible inputs if exercise is open
+      const wEl = document.getElementById(`w-${nextEi}-${nextS}`);
+      const rEl = document.getElementById(`r-${nextEi}-${nextS}`);
+      if (wEl && weightEl.value) wEl.value = weightEl.value;
+      if (rEl && repsEl.value) rEl.value = repsEl.value;
+    }
+  }
+
   timerStartTime = null;
   timerPaused = false;
+  timerCurrentEi = null;
+  timerCurrentS = null;
   document.getElementById('timer-overlay').style.display = 'none';
   document.getElementById('timer-progress').style.stroke = 'var(--accent)';
+  if (infoEl) infoEl.style.display = 'none';
 }
 
 // Resume timer if app comes back from background
@@ -1896,10 +1995,27 @@ function toggleDone(ei, s) {
   if(r) r.classList.toggle('done', done);
 
   // Haptic feedback
-  if (navigator.vibrate) navigator.vibrate(done ? 30 : 10);
+  if (navigator.vibrate) navigator.vibrate(done ? [30] : [10]);
 
-  // PR check
   if (done) {
+    // Auto-copy weight and reps to next set if empty
+    const nextS = s + 1;
+    const activeSets = sessionData[ei]?.activeSets ?? DAYS[currentDay].exercises[ei].sets;
+    if (nextS < activeSets) {
+      if (!sessionData[ei].sets[nextS]) sessionData[ei].sets[nextS] = { weight: '', reps: '', done: false };
+      if (!sessionData[ei].sets[nextS].weight && sessionData[ei].sets[s].weight) {
+        sessionData[ei].sets[nextS].weight = sessionData[ei].sets[s].weight;
+        const nextW = document.getElementById(`w-${ei}-${nextS}`);
+        if (nextW) nextW.value = sessionData[ei].sets[s].weight;
+      }
+      if (!sessionData[ei].sets[nextS].reps && sessionData[ei].sets[s].reps) {
+        sessionData[ei].sets[nextS].reps = sessionData[ei].sets[s].reps;
+        const nextR = document.getElementById(`r-${ei}-${nextS}`);
+        if (nextR) nextR.value = sessionData[ei].sets[s].reps;
+      }
+    }
+
+    // PR check
     const weight = parseFloat(sessionData[ei].sets[s].weight);
     if (!isNaN(weight) && weight > 0) {
       const ex = DAYS[currentDay].exercises[ei];
@@ -1907,16 +2023,32 @@ function toggleDone(ei, s) {
       const pr = getPersonalRecord(displayName);
       if (weight > pr) showPRCelebration(displayName, weight);
     }
+
+    // Check if all sets done → auto-collapse
+    const ex = DAYS[currentDay].exercises[ei];
+    const activeSetsCount = sessionData[ei]?.activeSets ?? ex.sets;
+    const allDone = sessionData[ei].sets.slice(0, activeSetsCount).every(st => st.done);
+    if (allDone) {
+      setTimeout(() => {
+        const body = document.getElementById(`exbody-${ei}`);
+        const chev = document.getElementById(`chev-${ei}`);
+        if (body) body.classList.remove('open');
+        if (chev) chev.classList.remove('open');
+        // Update progress dots
+        const dots = document.querySelectorAll(`#exbody-${ei}`);
+        renderDay(); // re-render to update dots reliably
+      }, 600);
+    }
   }
 
   autoSave();
   updateTrainingEnd();
+
   if (done) {
     const ex = DAYS[currentDay].exercises[ei];
-    const swappedName = swappedExercises[ei] || null;
-    const displayName = swappedName || ex.name;
+    const displayName = swappedExercises[ei] || ex.name;
     const seconds = defaultPauseOverrides[displayName] || parsePause(ex.pause);
-    startTimer(seconds, displayName);
+    startTimer(seconds, displayName, ei, s);
   } else {
     closeTimer();
   }
@@ -2184,16 +2316,14 @@ function adjustTimer(delta) {
     timerPausedAt = Math.max(0, timerPausedAt + delta);
     timerTotal = Math.max(timerTotal, timerPausedAt);
   } else {
-    timerStartTime -= delta * 1000;
+    // +delta means more time: move startTime earlier so elapsed is less
+    timerStartTime += delta * 1000;
+    // Don't let startTime be in the future
+    if (timerStartTime > Date.now()) timerStartTime = Date.now();
     const remaining = getRemainingSeconds();
-    timerTotal = Math.max(timerTotal, remaining);
+    if (remaining > timerTotal) timerTotal = remaining;
     clearTimeout(notificationTimeout);
-    scheduleNotification(remaining, timerExerciseName);
-  }
-  // Save as default for this exercise
-  if (timerExerciseName) {
-    defaultPauseOverrides[timerExerciseName] = Math.round(getRemainingSeconds()) || timerTotal;
-    savePauseSettings();
+    if (remaining > 0) scheduleNotification(remaining, timerExerciseName);
   }
   updateTimerDisplay();
 }
