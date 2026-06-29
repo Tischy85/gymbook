@@ -323,20 +323,65 @@
   .session-date-wrap { display: flex; align-items: center; gap: 6px; flex: 1; }
   .session-note { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-left: auto; white-space: nowrap; }
 
-  /* Save bar – full width */
-  .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 20px calc(10px + env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; z-index: 100; }
+  /* TAB BAR */
+  .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 0.5px solid var(--border); padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); display: flex; z-index: 200; }
+  .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; background: none; border: none; cursor: pointer; padding: 4px 0; transition: all 0.15s; }
+  .tab-icon { font-size: 22px; line-height: 1; }
+  .tab-label { font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted2); }
+  .tab-btn.active .tab-label { color: var(--accent); }
+  .tab-btn.active .tab-icon { filter: none; }
+
+  /* HOME PAGE */
+  .home-page { padding: 14px 20px 100px; }
+  .home-greeting { margin-bottom: 20px; }
+  .home-greeting-title { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  .home-greeting-sub { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .home-card { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .home-card-title { font-family: var(--mono); font-size: 9px; color: var(--muted2); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  .home-next-type { font-size: 20px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+  .home-next-day { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .home-start-btn { display: block; width: 100%; background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 14px; border-radius: 10px; cursor: pointer; margin-top: 14px; transition: background 0.15s; }
+  .home-start-btn:hover { background: var(--accent3); }
+  .home-stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .home-stat { background: var(--bg3); border-radius: 8px; padding: 12px; text-align: center; }
+  .home-stat-val { font-family: var(--display, serif); font-size: 24px; font-weight: 700; color: var(--accent); }
+  .home-stat-label { font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .home-last-session { }
+  .home-last-ex { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 0.5px solid var(--border); font-size: 12px; }
+  .home-last-ex:last-child { border-bottom: none; }
+  .home-last-ex-name { color: var(--text); }
+  .home-last-ex-val { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .home-week-pills { display: flex; gap: 6px; margin-top: 8px; }
+  .home-week-pill { flex: 1; border-radius: 6px; padding: 8px 4px; text-align: center; }
+  .home-week-pill-label { font-family: var(--mono); font-size: 9px; color: var(--muted2); }
+  .home-week-pill.done { background: var(--accent-dim2); border: 0.5px solid rgba(201,168,76,0.3); }
+  .home-week-pill.done .home-week-pill-label { color: var(--accent); }
+  .home-week-pill.pending { background: var(--bg3); border: 0.5px solid var(--border); }
+  .home-pr-row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 0.5px solid var(--border); }
+  .home-pr-row:last-child { border-bottom: none; }
+
+  .save-bar { position: fixed; bottom: calc(56px + env(safe-area-inset-bottom)); left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 8px 20px; display: flex; align-items: center; gap: 12px; z-index: 100; }
   .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; flex: 1; }
   .save-status.saved { color: var(--accent); }
-  .save-bar-main-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 600; padding: 13px 0; border-radius: 10px; cursor: pointer; transition: background 0.15s; flex: 2; }
-  .save-bar-main-btn:hover { background: var(--accent3); }
-
-  /* Main content */
-  .main { padding: 14px 20px 120px; }
+  .main { padding: 14px 20px 140px; }
 </style>
 </head>
 <body>
 
-<div class="header">
+<div id="home-page" style="display:none">
+  <div class="header">
+    <div class="header-left">
+      <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
+      <p id="home-date" style="font-size:11px;color:var(--muted);font-family:monospace;margin-top:4px"></p>
+    </div>
+    <div class="header-right">
+      <button class="menu-btn" onclick="toggleMenu()">⋯</button>
+    </div>
+  </div>
+  <div class="home-page" id="home-content"></div>
+</div>
+
+<div id="training-page" style="display:none">
   <div class="header-left">
     <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
     <p id="today-date">— — —</p>
@@ -366,6 +411,20 @@
   <span class="save-status" id="save-status">Nicht gespeichert</span>
   <span class="training-end" id="training-end" style="display:none"></span>
   <button class="delete-session-btn" id="delete-session-btn" onclick="deleteSession()" style="display:none">🗑</button>
+</div>
+
+</div><!-- end training-page -->
+
+<!-- TAB BAR -->
+<div class="tab-bar" id="tab-bar">
+  <button class="tab-btn" id="tab-home" onclick="switchTab('home')">
+    <span class="tab-icon">🏠</span>
+    <span class="tab-label">Home</span>
+  </button>
+  <button class="tab-btn" id="tab-training" onclick="switchTab('training')">
+    <span class="tab-icon">💪</span>
+    <span class="tab-label">Training</span>
+  </button>
 </div>
 
 <!-- TIMER OVERLAY -->
@@ -543,7 +602,8 @@ async function cloudPull() {
     loadPauseSettings();
     setStatus('☁ Synchronisiert', true);
     renderNav();
-    renderDay();  } catch(e) {
+    if (currentTab === 'home') renderHome();
+    else renderDay();  } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
   }
@@ -2396,6 +2456,201 @@ function hideDayPicker() {
   if (panel) panel.style.display = 'none';
 }
 
+// ── TABS & HOME PAGE ──────────────────────────────────────────
+let currentTab = 'home';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('home-page').style.display = tab === 'home' ? 'block' : 'none';
+  document.getElementById('training-page').style.display = tab === 'training' ? 'block' : 'none';
+  document.getElementById('tab-home').classList.toggle('active', tab === 'home');
+  document.getElementById('tab-training').classList.toggle('active', tab === 'training');
+  document.getElementById('save-bar').style.display = tab === 'training' ? 'flex' : 'none';
+  if (tab === 'home') renderHome();
+  if (tab === 'training') renderDay();
+}
+
+function renderHome() {
+  const now = new Date();
+  const weekdays = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+  const greeting = now.getHours() < 12 ? 'Guten Morgen' : now.getHours() < 18 ? 'Guten Tag' : 'Guten Abend';
+
+  document.getElementById('home-date').textContent = `${weekdays[now.getDay()]}, ${formatDate(todayStr())}`;
+
+  // Next training day
+  const weekdayMap = { upper: 1, push: 3, pull: 5, legs: 6 };
+  const todayWd = now.getDay();
+  let nextDay = null, nextDiff = 8;
+  DAYS.forEach(d => {
+    const target = weekdayMap[d.id];
+    let diff = (target - todayWd + 7) % 7;
+    if (diff === 0) diff = 7;
+    if (diff < nextDiff) { nextDiff = diff; nextDay = d; }
+  });
+
+  // Today's session if exists
+  const todaySession = DAYS.find(d => {
+    const wd = weekdayMap[d.id];
+    return wd === todayWd;
+  });
+
+  // Week stats
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  weekStart.setHours(0,0,0,0);
+  const weekKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    if (p.length !== 3 || ['customplan','customcatalog','pausesettings'].includes(p[1])) return false;
+    if (p[1].startsWith('note') || p[1].startsWith('binId')) return false;
+    return new Date(p[2]) >= weekStart;
+  });
+  const weekDone = weekKeys.length;
+
+  // Total sessions
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    return p.length === 3 && !['customplan','customcatalog','pausesettings'].includes(p[1]) && !p[1].startsWith('note') && !p[1].startsWith('binId');
+  });
+
+  // Streak
+  const sessionDates = [...new Set(allKeys.map(k => k.split(':')[2]))].sort().reverse();
+  let streak = 0;
+  let checkDate = new Date(now); checkDate.setHours(0,0,0,0);
+  for (const date of sessionDates) {
+    const d = new Date(date);
+    const diff = Math.round((checkDate - d) / 86400000);
+    if (diff <= 7) { streak++; checkDate = d; } else break;
+  }
+
+  // Last session
+  const lastKey = allKeys.sort().reverse()[0];
+  let lastSessionHtml = '';
+  if (lastKey) {
+    const lastDayId = lastKey.split(':')[1];
+    const lastDate = lastKey.split(':')[2];
+    const lastDay = DAYS.find(d => d.id === lastDayId);
+    const raw = storageGet(lastKey);
+    if (raw && lastDay) {
+      const sets = raw.sets || raw;
+      const swapped = raw.swapped || {};
+      const entries = lastDay.exercises.slice(0, 4).map((ex, ei) => {
+        const name = swapped[ei] || ex.name;
+        const exSets = sets[ei]?.sets || [];
+        const filled = exSets.filter(s => s.weight);
+        if (!filled.length) return null;
+        const maxW = Math.max(...filled.map(s => parseFloat(s.weight)));
+        return { name, weight: maxW };
+      }).filter(Boolean).slice(0, 3);
+
+      lastSessionHtml = `
+        <div class="home-card">
+          <div class="home-card-title">Letztes Training · ${lastDay.type} · ${formatDate(lastDate)}</div>
+          ${entries.map(e => `
+            <div class="home-last-ex">
+              <span class="home-last-ex-name">${e.name}</span>
+              <span class="home-last-ex-val">${e.weight} kg</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+  }
+
+  // Top PRs
+  const bestLifts = {};
+  allKeys.forEach(k => {
+    const raw = storageGet(k);
+    if (!raw) return;
+    const sets = raw.sets || raw;
+    const swapped = raw.swapped || {};
+    DAYS.forEach((day, di) => {
+      day.exercises.forEach((ex, ei) => {
+        const name = swapped[ei] || ex.name;
+        const exSets = sets[ei]?.sets || [];
+        exSets.forEach(s => {
+          const w = parseFloat(s.weight);
+          if (!isNaN(w) && w > 0 && (!bestLifts[name] || w > bestLifts[name])) bestLifts[name] = w;
+        });
+      });
+    });
+  });
+  const topPRs = Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0, 3);
+
+  const weekPills = DAYS.filter(d => d.id !== 'legs').map(d => {
+    const wd = weekdayMap[d.id];
+    const dateObj = new Date(weekStart);
+    dateObj.setDate(weekStart.getDate() + wd - 1);
+    const dateStr = dateObj.toISOString().slice(0,10);
+    const done = !!storageGet(getKey(d.id, dateStr));
+    const labels = { upper: 'Mo', push: 'Mi', pull: 'Fr' };
+    return `<div class="home-week-pill ${done ? 'done' : 'pending'}">
+      <div class="home-week-pill-label">${labels[d.id]}</div>
+      <div style="font-size:14px;margin-top:2px">${done ? '✓' : '○'}</div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:1px">${d.type.split('-')[0]}</div>
+    </div>`;
+  }).join('');
+
+  const nextDayName = nextDiff === 1 ? 'Morgen' : nextDiff === 7 ? 'Nächsten ' + ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()] : ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()];
+
+  document.getElementById('home-content').innerHTML = `
+    <div class="home-greeting">
+      <div class="home-greeting-title">${greeting}, Marco 👋</div>
+      <div class="home-greeting-sub">Bereit fürs Training?</div>
+    </div>
+
+    ${todaySession ? `
+    <div class="home-card" style="border-color:rgba(201,168,76,0.3);background:rgba(201,168,76,0.05)">
+      <div class="home-card-title">Heute auf dem Plan</div>
+      <div class="home-next-type">${todaySession.type}</div>
+      <div class="home-next-day">${todaySession.duration}</div>
+      <button class="home-start-btn" onclick="switchTab('training')">Training starten →</button>
+    </div>
+    ` : nextDay ? `
+    <div class="home-card">
+      <div class="home-card-title">Nächste Einheit · ${nextDayName}</div>
+      <div class="home-next-type">${nextDay.type}</div>
+      <div class="home-next-day">${nextDay.duration}</div>
+      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(nextDay)};switchTab('training')">Zum Plan →</button>
+    </div>
+    ` : ''}
+
+    <div class="home-card">
+      <div class="home-card-title">Diese Woche</div>
+      <div class="home-week-pills">${weekPills}</div>
+    </div>
+
+    <div class="home-stats-grid" style="margin-bottom:12px">
+      <div class="home-stat">
+        <div class="home-stat-val">${allKeys.length}</div>
+        <div class="home-stat-label">Einheiten</div>
+      </div>
+      <div class="home-stat">
+        <div class="home-stat-val">${streak}</div>
+        <div class="home-stat-label">Streak</div>
+      </div>
+      <div class="home-stat">
+        <div class="home-stat-val">${weekDone}</div>
+        <div class="home-stat-label">Diese Woche</div>
+      </div>
+    </div>
+
+    ${lastSessionHtml}
+
+    ${topPRs.length ? `
+    <div class="home-card">
+      <div class="home-card-title">🏆 Bestleistungen</div>
+      ${topPRs.map(([name, w]) => `
+        <div class="home-pr-row">
+          <span style="font-size:12px;color:var(--text)">${name}</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${w} kg</span>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+  `;
+}
+// ─────────────────────────────────────────────────────────────
+
 function toggleMenu() {
   const menu = document.getElementById('menu-dropdown');
   menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -2692,8 +2947,7 @@ if ('serviceWorker' in navigator) {
 
 // Init
 renderNav();
-renderDay();
-// Cloud lädt im Hintergrund – UI ist sofort sichtbar
+switchTab('home');
 cloudInit();
 </script>
 </body>
