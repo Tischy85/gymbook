@@ -363,6 +363,8 @@
   .save-bar { position: fixed; bottom: calc(56px + env(safe-area-inset-bottom)); left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 8px 20px; display: flex; align-items: center; gap: 12px; z-index: 100; }
   .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; flex: 1; }
   .save-status.saved { color: var(--accent); }
+  .finish-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+  .finish-btn:hover { background: var(--accent3); }
   .main { padding: 14px 20px 140px; }
 </style>
 </head>
@@ -410,6 +412,12 @@
   <span class="save-status" id="save-status">Nicht gespeichert</span>
   <span class="training-end" id="training-end" style="display:none"></span>
   <button class="delete-session-btn" id="delete-session-btn" onclick="deleteSession()" style="display:none">🗑</button>
+  <button class="finish-btn" id="finish-btn" onclick="showFinishModal()" style="display:none">Training beenden</button>
+</div>
+
+<!-- FINISH MODAL -->
+<div class="modal-overlay" id="finish-modal" style="display:none" onclick="if(event.target===this)closeFinishModal()">
+  <div class="modal" id="finish-modal-content"></div>
 </div>
 
 </div><!-- end training-page -->
@@ -1388,7 +1396,10 @@ function renderDay() {
   const weekKeys = storageGetAllKeys().filter(k => {
     const parts = k.split(':');
     if (parts.length !== 3 || ['customplan','customcatalog','pausesettings'].includes(parts[1])) return false;
-    return new Date(parts[2]) >= weekStart;
+    if (parts[1].startsWith('note') || parts[1].startsWith('binId')) return false;
+    if (new Date(parts[2]) < weekStart) return false;
+    const raw = storageGet(k);
+    return raw?.completed === true;
   });
   const weekDone = weekKeys.length;
   const weekTotal = 3; // Mo/Mi/Fr
@@ -1968,6 +1979,7 @@ function calcTrainingEnd() {
 function updateTrainingEnd() {
   const el = document.getElementById('training-end');
   const delBtn = document.getElementById('delete-session-btn');
+  const finishBtn = document.getElementById('finish-btn');
   if (!el) return;
   const result = calcTrainingEnd();
   if (result) {
@@ -1976,9 +1988,12 @@ function updateTrainingEnd() {
   } else {
     el.style.display = 'none';
   }
-  // Show delete button if session has data
+  // Show delete and finish buttons if session has data
   const hasData = Object.values(sessionData).some(s => s.sets?.some(x => x.weight || x.done));
   if (delBtn) delBtn.style.display = hasData ? 'inline' : 'none';
+  if (finishBtn) finishBtn.style.display = hasData ? 'inline' : 'none';
+  // Track session start time
+  if (hasData && !sessionStartTime) sessionStartTime = Date.now();
 }
 
 function deleteSession() {
@@ -2155,6 +2170,7 @@ function switchDay(i) {
   if (dirty) { collectInputValues(); saveSession(); }
   currentDay = i;
   activeDate = null;
+  sessionStartTime = null;
   renderNav();
   renderDay();
 }
@@ -2501,7 +2517,7 @@ function renderHome() {
     return wd === todayWd;
   });
 
-  // Week stats
+  // Week stats – only completed sessions
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
   weekStart.setHours(0,0,0,0);
@@ -2509,17 +2525,22 @@ function renderHome() {
     const p = k.split(':');
     if (p.length !== 3 || ['customplan','customcatalog','pausesettings'].includes(p[1])) return false;
     if (p[1].startsWith('note') || p[1].startsWith('binId')) return false;
-    return new Date(p[2]) >= weekStart;
+    if (new Date(p[2]) < weekStart) return false;
+    const raw = storageGet(k);
+    return raw?.completed === true;
   });
   const weekDone = weekKeys.length;
 
-  // Total sessions
+  // Total sessions – only completed
   const allKeys = storageGetAllKeys().filter(k => {
     const p = k.split(':');
-    return p.length === 3 && !['customplan','customcatalog','pausesettings'].includes(p[1]) && !p[1].startsWith('note') && !p[1].startsWith('binId');
+    if (p.length !== 3 || ['customplan','customcatalog','pausesettings'].includes(p[1])) return false;
+    if (p[1].startsWith('note') || p[1].startsWith('binId')) return false;
+    const raw = storageGet(k);
+    return raw?.completed === true;
   });
 
-  // Streak
+  // Streak – based on completed sessions
   const sessionDates = [...new Set(allKeys.map(k => k.split(':')[2]))].sort().reverse();
   let streak = 0;
   let checkDate = new Date(now); checkDate.setHours(0,0,0,0);
@@ -2655,6 +2676,74 @@ function renderHome() {
     </div>
     ` : ''}
   `;
+}
+// ─────────────────────────────────────────────────────────────
+
+// ── TRAINING ABSCHLIESSEN ─────────────────────────────────────
+let sessionStartTime = null;
+
+function showFinishModal() {
+  const day = DAYS[currentDay];
+  const date = activeDateStr();
+
+  // Calculate stats
+  const duration = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 60000) : null;
+  let totalSetsCompleted = 0;
+  let newPRs = [];
+
+  day.exercises.forEach((ex, ei) => {
+    const sd = sessionData[ei] || { sets: [] };
+    if (sd.skipped) return;
+    const doneSets = (sd.sets || []).filter(s => s.done);
+    totalSetsCompleted += doneSets.length;
+  });
+
+  const html = `
+    <div style="text-align:center;padding:8px 0 16px">
+      <div style="font-size:40px;margin-bottom:8px">🏆</div>
+      <div style="font-size:20px;font-weight:700;letter-spacing:-0.3px">Training abgeschlossen!</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px">${day.type} · ${formatDate(date)}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">
+      ${duration ? `
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${duration}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Minuten</div>
+      </div>` : ''}
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${totalSetsCompleted}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Sätze</div>
+      </div>
+    </div>
+    <button onclick="completeSession()" style="width:100%;background:var(--accent);color:#090909;border:none;font-family:var(--mono);font-size:13px;font-weight:600;padding:15px;border-radius:10px;cursor:pointer;margin-bottom:8px">✓ Training abschließen</button>
+    <button onclick="closeFinishModal()" style="width:100%;background:none;border:0.5px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:12px;padding:13px;border-radius:10px;cursor:pointer">Weiter trainieren</button>
+  `;
+
+  document.getElementById('finish-modal-content').innerHTML = html;
+  document.getElementById('finish-modal').style.display = 'flex';
+}
+
+function closeFinishModal() {
+  document.getElementById('finish-modal').style.display = 'none';
+}
+
+function completeSession() {
+  const day = DAYS[currentDay];
+  const date = activeDateStr();
+  // Mark session as completed
+  const key = getKey(day.id, date);
+  const existing = storageGet(key) || {};
+  existing.completed = true;
+  storageSet(key, existing);
+  closeFinishModal();
+  setStatus('✓ Training abgeschlossen!', true);
+  // Switch to home to show updated stats
+  setTimeout(() => switchTab('home'), 1000);
+}
+
+function isSessionCompleted(dayId, date) {
+  const raw = storageGet(getKey(dayId, date));
+  return raw?.completed === true;
 }
 // ─────────────────────────────────────────────────────────────
 
