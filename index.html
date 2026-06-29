@@ -63,7 +63,7 @@
   .ex-num { font-family: var(--mono); font-size: 10px; color: var(--muted2); width: 18px; flex-shrink: 0; }
   .ex-name { font-size: 13px; font-weight: 600; flex: 1; letter-spacing: -0.2px; }
   .ex-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
-  .ex-chevron { font-size: 9px; color: var(--muted2); transition: transform 0.2s; }
+  .ex-chevron { width: 18px; height: 18px; color: var(--muted2); transition: transform 0.25s ease; flex-shrink: 0; }
   .ex-chevron.open { transform: rotate(90deg); }
   .exercise-body { display: none; padding: 0 18px 16px; border-top: 0.5px solid var(--border); }
   .exercise-body.open { display: block; }
@@ -1515,7 +1515,7 @@ function renderDay() {
           </div>
           ${suggLabel}
           ${timerExerciseName === displayName && document.getElementById('timer-overlay')?.style.display !== 'none' ? '<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-left:4px">⏱</span>' : ''}
-          <span class="ex-chevron" id="chev-${ei}">▶</span>
+          <svg class="ex-chevron" id="chev-${ei}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="exercise-body" id="exbody-${ei}">
           <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:6px;flex-wrap:wrap">
