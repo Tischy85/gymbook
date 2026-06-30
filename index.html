@@ -153,27 +153,29 @@
   }
 
   /* TIMER */
-  #timer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 300; display: flex; align-items: flex-end; justify-content: center; padding: 0; backdrop-filter: blur(6px); }
-  #timer-box { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 20px 20px 0 0; padding: 18px 20px calc(18px + env(safe-area-inset-bottom)); width: 100%; max-width: 420px; }
-  #timer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #timer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 300; display: flex; align-items: flex-end; justify-content: center; padding: 0; backdrop-filter: blur(8px); }
+  #timer-box { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 24px 24px 0 0; padding: 20px 24px calc(20px + env(safe-area-inset-bottom)); width: 100%; }
+  #timer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   #timer-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
-  #timer-header button { background: none; border: none; color: var(--muted); font-size: 20px; cursor: pointer; line-height: 1; padding: 0; }
-  #timer-ring-wrap { position: relative; width: 110px; height: 110px; margin: 0 auto 12px; }
-  #timer-svg { width: 110px; height: 110px; transform: rotate(-90deg); }
+  #timer-header button { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; line-height: 1; padding: 0; }
+  #timer-ring-wrap { position: relative; width: 120px; height: 120px; margin: 0 auto 10px; }
+  #timer-svg { width: 120px; height: 120px; transform: rotate(-90deg); }
   #timer-track { fill: none; stroke: var(--bg4); stroke-width: 6; }
   #timer-progress { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 327; stroke-dashoffset: 0; transition: stroke-dashoffset 1s linear; }
-  #timer-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 34px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
+  #timer-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 38px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
   #timer-next-info { margin-bottom: 10px; text-align: center; }
-  #timer-next-label { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 4px; }
-  #timer-next-inputs input { background: #111114; border: 1px solid rgba(255,255,255,0.22); color: #f5f2eb; font-family: var(--mono); font-size: 15px; padding: 8px; border-radius: 6px; width: 72px; text-align: center; outline: none; }
+  #timer-next-label { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+  #timer-next-inputs { display: flex; gap: 10px; justify-content: center; }
+  #timer-next-inputs > div { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  #timer-next-inputs input { background: #111114; border: 1px solid rgba(255,255,255,0.22); color: #f5f2eb; font-family: var(--mono); font-size: 18px; padding: 10px 8px; border-radius: 8px; width: 80px; text-align: center; outline: none; }
   #timer-next-inputs input:focus { border-color: var(--accent); }
-  #timer-adjust { display: flex; gap: 6px; justify-content: center; margin-bottom: 10px; }
-  #timer-adjust button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 7px 12px; border-radius: 6px; cursor: pointer; transition: all 0.15s; }
+  #timer-adjust { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+  #timer-adjust button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 12px 0; border-radius: 8px; cursor: pointer; transition: all 0.15s; text-align: center; }
   #timer-adjust button:hover { border-color: var(--accent); color: var(--accent); }
   #timer-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #timer-pause-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 500; padding: 12px; border-radius: 8px; cursor: pointer; transition: background 0.15s; }
+  #timer-pause-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 13px; font-weight: 600; padding: 15px; border-radius: 10px; cursor: pointer; transition: background 0.15s; }
   #timer-pause-btn:hover { background: var(--accent3); }
-  #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+  #timer-skip-btn { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 13px; padding: 15px; border-radius: 10px; cursor: pointer; transition: all 0.15s; }
   #timer-skip-btn:hover { border-color: var(--muted); color: var(--text); }
 
   .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
@@ -185,8 +187,8 @@
   .progress-dot.done { background: var(--accent); }
   .progress-bar-wrap { height: 2px; background: var(--bg4); border-radius: 1px; margin-top: 5px; overflow: hidden; }
   .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 1px; transition: width 0.3s; }
-  .quick-btns { display: flex; flex-direction: column; gap: 2px; }
-  .quick-btns button { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 13px; font-weight: 500; width: 28px; height: 21px; border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
+  .quick-btns { display: flex; flex-direction: column; gap: 3px; }
+  .quick-btns button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 15px; font-weight: 600; width: 40px; height: 28px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
   .quick-btns button:hover { background: var(--accent); color: #090909; border-color: var(--accent); }
   .quick-btns button:active { transform: scale(0.92); }
   /* CALENDAR */
@@ -1321,7 +1323,7 @@ function renderEditDay() {
     html += `
       <div class="edit-card" draggable="true" ondragstart="onDragStart(${ei})" ondragover="onDragOver(${ei}, event)" ondragend="onDragEnd()">
         <div class="edit-card-header">
-          <span style="font-size:16px;color:var(--muted2);cursor:grab;padding:0 4px">⠿</span>
+          <span style="font-size:18px;color:var(--muted2);cursor:grab;padding:4px 6px;touch-action:none" ontouchstart="onDragHandleTouch(${ei}, event)">⠿</span>
           <span class="edit-ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
             <div class="edit-ex-name">${ex.name}</div>
@@ -1775,13 +1777,19 @@ function scheduleNotification(seconds, exerciseName) {
   clearTimeout(notificationTimeout);
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   notificationTimeout = setTimeout(() => {
-    try {
-      new Notification('GymBook – Pause vorbei! 💪', {
-        body: `Nächster Satz: ${exerciseName}`,
-        icon: 'https://tischy85.github.io/gymbook/icon.png',
-        vibrate: [200, 100, 200]
-      });
-    } catch(e) {}
+    // Only notify if app is not visible
+    if (document.hidden) {
+      try {
+        new Notification('GymBook – Pause vorbei! 💪', {
+          body: `Nächster Satz: ${exerciseName}`,
+          icon: 'https://tischy85.github.io/gymbook/icon.png',
+          vibrate: [200, 100, 200]
+        });
+      } catch(e) {}
+    } else {
+      // App is visible – vibrate instead
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    }
   }, seconds * 1000);
 }
 
@@ -2465,32 +2473,71 @@ function showCalendar() {
 }
 // ─────────────────────────────────────────────────────────────
 
-// ── DRAG TO REORDER ───────────────────────────────────────────
+// ── DRAG TO REORDER (Touch-basiert für Mobile) ────────────────
 let dragSrcEi = null;
+let dragTouchY = 0;
+let dragEl = null;
 
-function onDragStart(ei) {
+function onDragHandleTouch(ei, e) {
+  e.preventDefault();
   dragSrcEi = ei;
+  dragTouchY = e.touches[0].clientY;
+  dragEl = e.currentTarget.closest('.edit-card');
+  if (dragEl) dragEl.style.opacity = '0.5';
+
+  document.addEventListener('touchmove', onDragTouchMove, { passive: false });
+  document.addEventListener('touchend', onDragTouchEnd);
 }
 
+function onDragTouchMove(e) {
+  e.preventDefault();
+  const y = e.touches[0].clientY;
+  const cards = document.querySelectorAll('.edit-card');
+  let targetEi = null;
+  cards.forEach((card, i) => {
+    const rect = card.getBoundingClientRect();
+    if (y >= rect.top && y <= rect.bottom) targetEi = i;
+  });
+  if (targetEi !== null && targetEi !== dragSrcEi) {
+    const di = currentDay;
+    const ex = DAYS[di].exercises.splice(dragSrcEi, 1)[0];
+    DAYS[di].exercises.splice(targetEi, 0, ex);
+    if (editDraft) {
+      const exD = editDraft[di].exercises.splice(dragSrcEi, 1)[0];
+      editDraft[di].exercises.splice(targetEi, 0, exD);
+    }
+    dragSrcEi = targetEi;
+    renderDay();
+    // Re-attach listeners after re-render
+    document.addEventListener('touchmove', onDragTouchMove, { passive: false });
+    document.addEventListener('touchend', onDragTouchEnd);
+  }
+}
+
+function onDragTouchEnd() {
+  if (dragEl) dragEl.style.opacity = '';
+  dragEl = null;
+  dragSrcEi = null;
+  document.removeEventListener('touchmove', onDragTouchMove);
+  document.removeEventListener('touchend', onDragTouchEnd);
+}
+
+// Desktop drag support
+function onDragStart(ei) { dragSrcEi = ei; }
 function onDragOver(ei, e) {
   e.preventDefault();
   if (dragSrcEi === null || dragSrcEi === ei) return;
   const di = currentDay;
-  const exercises = DAYS[di].exercises;
-  const moved = exercises.splice(dragSrcEi, 1)[0];
-  exercises.splice(ei, 0, moved);
+  const moved = DAYS[di].exercises.splice(dragSrcEi, 1)[0];
+  DAYS[di].exercises.splice(ei, 0, moved);
   if (editDraft) {
-    const draftEx = editDraft[di].exercises;
-    const movedDraft = draftEx.splice(dragSrcEi, 1)[0];
-    draftEx.splice(ei, 0, movedDraft);
+    const movedD = editDraft[di].exercises.splice(dragSrcEi, 1)[0];
+    editDraft[di].exercises.splice(ei, 0, movedD);
   }
   dragSrcEi = ei;
   renderDay();
 }
-
-function onDragEnd() {
-  dragSrcEi = null;
-}
+function onDragEnd() { dragSrcEi = null; }
 // ─────────────────────────────────────────────────────────────
 
 function showDayPicker() {
