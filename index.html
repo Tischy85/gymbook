@@ -365,7 +365,7 @@
   .save-bar { position: fixed; bottom: calc(56px + env(safe-area-inset-bottom)); left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 8px 20px; display: flex; align-items: center; gap: 12px; z-index: 100; }
   .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; flex: 1; }
   .save-status.saved { color: var(--accent); }
-  .finish-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 11px; font-weight: 600; padding: 8px 16px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+  .finish-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 9px 18px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 0.15s; letter-spacing: 0.02em; }
   .finish-btn:hover { background: var(--accent3); }
   .main { padding: 14px 20px 140px; }
 </style>
@@ -1100,6 +1100,9 @@ function setCatalogMuscle(key) {
 }
 
 function applySwap(ei, altName) {
+  // Save scroll position before re-render
+  const scrollY = document.getElementById('main-content')?.scrollTop || window.scrollY;
+
   if (catalogEditMode) {
     const di = catalogTargetDi;
     let muscle = DAYS[di].exercises[ei].muscle;
@@ -1121,7 +1124,9 @@ function applySwap(ei, altName) {
   autoSave();
   closeCatalog();
   renderDay();
+  // Restore scroll and reopen card
   setTimeout(() => {
+    window.scrollTo(0, scrollY);
     const body = document.getElementById(`exbody-${ei}`);
     const chev = document.getElementById(`chev-${ei}`);
     if (body) body.classList.add('open');
@@ -2700,7 +2705,51 @@ function renderStats() {
     historyHtml += `</div>`;
   });
 
+  // Body weight for stats
+  const bwKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:bodyweight:')).sort();
+  const bwHistory = bwKeys.slice(-12).map(k => ({
+    date: k.split(':')[2],
+    weight: parseFloat(storageGet(k))
+  })).filter(e => !isNaN(e.weight));
+
   document.getElementById('stats-content').innerHTML = `
+    <!-- KÖRPERGEWICHT -->
+    ${bwHistory.length > 0 ? (() => {
+      const weights = bwHistory.map(e => e.weight);
+      const minW = Math.min(...weights) - 0.5;
+      const maxW = Math.max(...weights) + 0.5;
+      const range = maxW - minW || 1;
+      const W = 280, H = 56;
+      const pts = bwHistory.map((e, i) => {
+        const x = bwHistory.length > 1 ? (i / (bwHistory.length - 1)) * W : W/2;
+        const y = H - ((e.weight - minW) / range) * H;
+        return `${x},${y}`;
+      }).join(' ');
+      const trend = weights.length > 1 ? weights[weights.length-1] - weights[0] : 0;
+      const trendColor = trend < 0 ? '#22c55e' : trend > 0 ? '#e87f7f' : 'var(--muted)';
+      return `<div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em">Körpergewicht</div>
+          <button onclick="showBWInput()" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--accent);font-family:var(--mono);font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer">+ Eintrag</button>
+        </div>
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+          <span style="font-family:var(--display,serif);font-size:28px;font-weight:700;color:var(--accent)">${weights[weights.length-1].toFixed(1)} kg</span>
+          ${trend !== 0 ? `<span style="font-family:var(--mono);font-size:11px;color:${trendColor}">${trend > 0 ? '+' : ''}${trend.toFixed(1)} kg</span>` : ''}
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:56px;overflow:visible">
+          <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          ${bwHistory.map((e, i) => { const x=bwHistory.length>1?(i/(bwHistory.length-1))*W:W/2; const y=H-((e.weight-minW)/range)*H; return `<circle cx="${x}" cy="${y}" r="3" fill="var(--accent)"/>`; }).join('')}
+        </svg>
+        <div style="display:flex;justify-content:space-between;margin-top:4px">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">${formatDate(bwHistory[0].date)}</span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">${formatDate(bwHistory[bwHistory.length-1].date)}</span>
+        </div>
+      </div>`;
+    })() : `<div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">Noch kein Körpergewicht eingetragen</div>
+      <button onclick="showBWInput()" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--accent);font-family:var(--mono);font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer">+ Eintrag</button>
+    </div>`}
+
     <!-- KALENDER -->
     <div style="margin-bottom:20px">
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">${monthNames[month]} ${year} · ${completedKeys.length} Einheiten gesamt</div>
@@ -2968,6 +3017,14 @@ function renderHome() {
 
   const nextDayName = nextDiff === 1 ? 'Morgen' : nextDiff === 7 ? 'Nächsten ' + ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()] : ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()];
 
+  // Body weight history
+  const bwKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:bodyweight:')).sort().reverse();
+  const latestBW = bwKeys.length ? storageGet(bwKeys[0]) : null;
+  const bwHistory = bwKeys.slice(0, 12).map(k => ({
+    date: k.split(':')[2],
+    weight: parseFloat(storageGet(k))
+  })).reverse().filter(e => !isNaN(e.weight));
+
   document.getElementById('home-content').innerHTML = `
     <div class="home-greeting">
       <div class="home-greeting-title">${greeting}, Marco 👋</div>
@@ -2995,6 +3052,43 @@ function renderHome() {
       <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(nextDay)};switchTab('training')">Zum Plan →</button>
     </div>
     ` : ''}
+
+    <!-- KÖRPERGEWICHT -->
+    <div class="home-card">
+      <div class="home-card-title">Körpergewicht</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${bwHistory.length > 1 ? '12px' : '0'}">
+        <div style="flex:1">
+          <div style="font-family:var(--display,serif);font-size:28px;font-weight:700;color:var(--accent)">${latestBW ? parseFloat(latestBW).toFixed(1) + ' kg' : '—'}</div>
+          ${latestBW ? `<div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:2px">${formatDate(bwKeys[0].split(':')[2])}</div>` : '<div style="font-family:var(--mono);font-size:10px;color:var(--muted)">Noch kein Eintrag</div>'}
+        </div>
+        <button onclick="showBWInput()" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--accent);font-family:var(--mono);font-size:18px;font-weight:600;width:40px;height:40px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+      </div>
+      ${bwHistory.length > 1 ? (() => {
+        const weights = bwHistory.map(e => e.weight);
+        const minW = Math.min(...weights) - 0.5;
+        const maxW = Math.max(...weights) + 0.5;
+        const range = maxW - minW || 1;
+        const w = 260, h = 48;
+        const pts = bwHistory.map((e, i) => {
+          const x = (i / (bwHistory.length - 1)) * w;
+          const y = h - ((e.weight - minW) / range) * h;
+          return `${x},${y}`;
+        }).join(' ');
+        const trend = weights[weights.length-1] - weights[0];
+        const trendColor = trend < 0 ? '#22c55e' : trend > 0 ? '#e87f7f' : 'var(--muted)';
+        const trendStr = (trend > 0 ? '+' : '') + trend.toFixed(1) + ' kg';
+        return `<div style="position:relative">
+          <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:48px;overflow:visible">
+            <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+            ${bwHistory.map((e, i) => { const x=(i/(bwHistory.length-1))*w; const y=h-((e.weight-minW)/range)*h; return `<circle cx="${x}" cy="${y}" r="3" fill="var(--accent)"/>`; }).join('')}
+          </svg>
+          <div style="display:flex;justify-content:space-between;margin-top:4px">
+            <span style="font-family:var(--mono);font-size:9px;color:var(--muted2)">${formatDate(bwHistory[0].date)}</span>
+            <span style="font-family:var(--mono);font-size:9px;color:${trendColor}">${trendStr}</span>
+          </div>
+        </div>`;
+      })() : ''}
+    </div>
 
     <div class="home-card">
       <div class="home-card-title">Diese Woche</div>
@@ -3111,6 +3205,36 @@ function completeSession() {
 function isSessionCompleted(dayId, date) {
   const raw = storageGet(getKey(dayId, date));
   return raw?.completed === true;
+}
+// ─────────────────────────────────────────────────────────────
+
+// ── KÖRPERGEWICHT ─────────────────────────────────────────────
+function showBWInput() {
+  const today = todayStr();
+  const existing = storageGet(`gymbook:bodyweight:${today}`) || '';
+  const html = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Körpergewicht</h2>
+    <div style="margin:16px 0">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Heutiges Gewicht (kg)</div>
+      <input type="number" id="bw-input" step="0.1" min="30" max="300" value="${existing}" placeholder="z.B. 79.5"
+        style="width:100%;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:24px;padding:14px;border-radius:8px;outline:none;text-align:center;box-sizing:border-box"
+        onfocus="this.select()">
+    </div>
+    <button onclick="saveBW()" style="width:100%;background:var(--accent);color:#090909;border:none;font-family:var(--mono);font-size:13px;font-weight:600;padding:14px;border-radius:10px;cursor:pointer">Speichern</button>
+  `;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('bw-input')?.focus(), 100);
+}
+
+function saveBW() {
+  const val = parseFloat(document.getElementById('bw-input')?.value);
+  if (isNaN(val) || val <= 0) return;
+  const today = todayStr();
+  storageSet(`gymbook:bodyweight:${today}`, String(val));
+  closeModal();
+  renderHome();
 }
 // ─────────────────────────────────────────────────────────────
 
