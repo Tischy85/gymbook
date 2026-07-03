@@ -400,6 +400,8 @@
 <div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
   <button class="menu-item" onclick="switchTab('stats');toggleMenu()"><span class="menu-item-icon">📊</span>Statistiken</button>
   <div class="menu-divider"></div>
+  <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
+  <div class="menu-divider"></div>
   <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
   <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
   <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
@@ -1728,6 +1730,7 @@ function toggleEx(ei, headerEl) {
 
 // ── TIMER ─────────────────────────────────────────────────────
 let timerInterval = null;
+let timerEnabled = localStorage.getItem('gymbook:timerEnabled') !== 'false'; // default: an
 let timerTotal = 0;
 let timerStartTime = null;   // timestamp when timer started
 let timerPaused = false;
@@ -2100,12 +2103,12 @@ function toggleDone(ei, s) {
   autoSave();
   updateTrainingEnd();
 
-  if (done) {
+  if (done && timerEnabled) {
     const ex = DAYS[currentDay].exercises[ei];
     const displayName = swappedExercises[ei] || ex.name;
     const seconds = defaultPauseOverrides[displayName] || parsePause(ex.pause);
     startTimer(seconds, displayName, ei, s);
-  } else {
+  } else if (!done) {
     closeTimer();
   }
 }
@@ -3084,6 +3087,13 @@ function saveBW() {
 }
 // ─────────────────────────────────────────────────────────────
 
+function toggleTimerEnabled() {
+  timerEnabled = !timerEnabled;
+  localStorage.setItem('gymbook:timerEnabled', String(timerEnabled));
+  const el = document.getElementById('timer-toggle-label');
+  if (el) el.textContent = timerEnabled ? 'Pausentimer: An' : 'Pausentimer: Aus';
+}
+
 function toggleMenu() {
   const menu = document.getElementById('menu-dropdown');
   menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
@@ -3156,6 +3166,7 @@ if ('serviceWorker' in navigator) {
 // ─────────────────────────────────────────────────────────────
 
 // Init
+document.getElementById('timer-toggle-label').textContent = `Pausentimer: ${timerEnabled ? 'An' : 'Aus'}`;
 renderNav();
 switchTab('home');
 cloudInit();
