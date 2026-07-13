@@ -277,6 +277,15 @@
   .ex-list-row { display: flex; align-items: center; background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
   .ex-list-row:hover { border-color: var(--border2); }
   .ex-list-row .ex-chevron { color: var(--muted2); }
+  .filter-btn { background: var(--bg2); border: 1px solid rgba(255,255,255,0.22); color: var(--muted); width: 42px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-popup-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 250; display: flex; align-items: flex-start; justify-content: flex-end; padding-top: 150px; padding-right: 20px; }
+  .filter-popup { background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 14px; padding: 6px; min-width: 200px; max-height: 70vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+  .filter-popup-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 9px; cursor: pointer; font-size: 14px; color: var(--text); transition: background 0.1s; }
+  .filter-popup-item:hover { background: var(--bg3); }
+  .filter-popup-item.active { color: var(--accent); font-weight: 600; }
+  .filter-popup-check { color: var(--accent); font-size: 15px; }
+  .filter-popup-divider { height: 0.5px; background: var(--border); margin: 4px 8px; }
   .cat-ex-row.cat-ex-active { background: var(--accent-dim); }
   .cat-ex-name { font-size: 13px; color: var(--text); flex: 1; }
   .cat-ex-arrow { font-family: var(--mono); font-size: 12px; color: var(--muted2); margin-left: 10px; }
@@ -453,17 +462,25 @@
   <div class="header">
     <div class="header-left">
       <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
-      <p style="font-size:11px;color:var(--muted);font-family:monospace;margin-top:4px">Übungen</p>
+      <p style="font-size:11px;color:var(--muted);font-family:monospace;margin-top:4px" id="exercises-count">Übungen</p>
     </div>
     <div class="header-right">
       <button class="menu-btn" onclick="toggleMenu()">⋯</button>
     </div>
   </div>
-  <div style="padding:10px 20px 0" id="exercises-search-wrap">
-    <input type="text" id="exercises-search" placeholder="Übung suchen…" oninput="renderExercises()"
-      style="width:100%;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:11px 14px;border-radius:8px;outline:none;box-sizing:border-box">
+  <div style="padding:10px 20px 0;display:flex;gap:8px" id="exercises-search-wrap">
+    <input type="text" id="exercises-search" placeholder="Suchen…" oninput="renderExercises()"
+      style="flex:1;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:11px 14px;border-radius:8px;outline:none;box-sizing:border-box;min-width:0">
+    <button class="filter-btn" onclick="toggleMuscleFilter()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="17" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
+    </button>
   </div>
-  <div class="cat-tabs" id="exercises-muscle-tabs" style="padding:12px 20px 0"></div>
+
+  <!-- Filter Popup -->
+  <div class="filter-popup-overlay" id="muscle-filter-overlay" style="display:none" onclick="if(event.target===this)toggleMuscleFilter()">
+    <div class="filter-popup" id="muscle-filter-popup"></div>
+  </div>
+
   <div style="padding:10px 20px 120px" id="exercises-content"></div>
 </div>
 
@@ -2725,7 +2742,7 @@ function switchTab(tab) {
 }
 
 // ── ÜBUNGEN-TAB (Übung im Fokus) ──────────────────────────────
-let exercisesActiveMuscle = 'brust';
+let exercisesActiveMuscle = 'all';
 
 function renderExercises() {
   try {
@@ -2746,7 +2763,30 @@ function renderExercises() {
 
 function setExercisesMuscle(key) {
   exercisesActiveMuscle = key;
+  toggleMuscleFilter(); // Popup schließen
   renderExercises();
+}
+
+function toggleMuscleFilter() {
+  const overlay = document.getElementById('muscle-filter-overlay');
+  const isOpen = overlay.style.display === 'flex';
+  if (isOpen) {
+    overlay.style.display = 'none';
+    return;
+  }
+  const popup = document.getElementById('muscle-filter-popup');
+  popup.innerHTML = `
+    <div class="filter-popup-item ${exercisesActiveMuscle === 'all' ? 'active' : ''}" onclick="setExercisesMuscle('all')">
+      <span>Beliebiger Bereich</span>${exercisesActiveMuscle === 'all' ? '<span class="filter-popup-check">✓</span>' : ''}
+    </div>
+    <div class="filter-popup-divider"></div>
+    ${Object.entries(CATALOG).map(([key, cat]) => `
+      <div class="filter-popup-item ${exercisesActiveMuscle === key ? 'active' : ''}" onclick="setExercisesMuscle('${key}')">
+        <span>${cat.label}</span>${exercisesActiveMuscle === key ? '<span class="filter-popup-check">✓</span>' : ''}
+      </div>
+    `).join('')}
+  `;
+  overlay.style.display = 'flex';
 }
 
 // Für jede Übungs-ID: in welchen Tagen (über alle Pläne) kommt sie aktuell vor
@@ -2764,25 +2804,22 @@ function getDaysContainingExercise(exerciseId) {
 
 function renderExercisesInner() {
   const term = (document.getElementById('exercises-search')?.value || '').toLowerCase().trim();
+  const totalCount = Object.values(CATALOG).reduce((sum, cat) => sum + cat.exercises.length, 0);
 
-  // Muskel-Tabs
-  const tabsEl = document.getElementById('exercises-muscle-tabs');
-  tabsEl.innerHTML = Object.entries(CATALOG).map(([key, cat]) => `
-    <button class="cat-tab ${exercisesActiveMuscle === key ? 'active' : ''}" onclick="setExercisesMuscle('${key}')">
-      <span class="cat-svg" style="color:${exercisesActiveMuscle === key ? 'var(--accent)' : 'var(--muted2)'}">${cat.svg}</span>
-      <span class="cat-label">${cat.label}</span>
-    </button>
-  `).join('');
-
-  // Übungsliste: entweder gefiltert über alle Kategorien (bei Suche) oder nur aktive Kategorie
+  // Übungsliste: nach gewähltem Bereich, zusätzlich nach Suchbegriff gefiltert
   let exercisesToShow = [];
-  if (term) {
-    Object.values(CATALOG).forEach(cat => {
-      cat.exercises.forEach(ex => { if (ex?.name?.toLowerCase().includes(term)) exercisesToShow.push(ex); });
-    });
+  if (exercisesActiveMuscle === 'all') {
+    Object.values(CATALOG).forEach(cat => exercisesToShow.push(...cat.exercises.filter(Boolean)));
   } else {
     exercisesToShow = CATALOG[exercisesActiveMuscle].exercises.filter(Boolean);
   }
+  if (term) {
+    exercisesToShow = exercisesToShow.filter(ex => ex?.name?.toLowerCase().includes(term));
+  }
+
+  // Zähler oben aktualisieren
+  const countEl = document.getElementById('exercises-count');
+  if (countEl) countEl.textContent = `${exercisesToShow.length} / ${totalCount} Übungen`;
 
   const html = exercisesToShow.map(ex => {
     const best = getPersonalRecordById(ex.id, ex.name);
