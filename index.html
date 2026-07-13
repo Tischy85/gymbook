@@ -1625,6 +1625,24 @@ function renderNav() {
 
 function renderDay() {
   if (editMode) { renderEditDay(); return; }
+  try {
+    renderDayInner();
+  } catch (err) {
+    console.error('renderDay Fehler:', err);
+    const main = document.getElementById('main-content');
+    if (main) {
+      main.innerHTML = `
+        <div style="padding:16px;background:rgba(232,96,96,0.08);border:0.5px solid rgba(232,96,96,0.3);border-radius:10px;margin-top:10px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:10px">Screenshot davon hilft, den Fehler zu finden.</div>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderDayInner() {
   const day = DAYS[currentDay];
   loadSessionData();
   const date = activeDateStr();
@@ -2666,6 +2684,23 @@ function switchTab(tab) {
 let statsSearchTerm = '';
 
 function renderStats() {
+  try {
+    renderStatsInner();
+  } catch (err) {
+    console.error('renderStats Fehler:', err);
+    const el = document.getElementById('stats-content');
+    if (el) {
+      el.innerHTML = `
+        <div style="padding:16px;background:rgba(232,96,96,0.08);border:0.5px solid rgba(232,96,96,0.3);border-radius:10px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderStatsInner() {
   const now = new Date();
   const year = now.getFullYear();
   const month = now.getMonth();
@@ -3008,6 +3043,23 @@ function showDayDetail(dateStr) {
 // ─────────────────────────────────────────────────────────────
 
 function renderHome() {
+  try {
+    renderHomeInner();
+  } catch (err) {
+    console.error('renderHome Fehler:', err);
+    const el = document.getElementById('home-content');
+    if (el) {
+      el.innerHTML = `
+        <div style="padding:16px;background:rgba(232,96,96,0.08);border:0.5px solid rgba(232,96,96,0.3);border-radius:10px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+        </div>
+      `;
+    }
+  }
+}
+
+function renderHomeInner() {
   const now = new Date();
   const weekdays = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
   const greeting = now.getHours() < 12 ? 'Guten Morgen' : now.getHours() < 18 ? 'Guten Tag' : 'Guten Abend';
