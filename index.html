@@ -319,6 +319,12 @@
   .nav-btn.active-pull   { background: rgba(127,184,232,0.12); border-color: var(--pull);  color: var(--pull); }
   .nav-btn.active-legs   { background: rgba(232,168,127,0.12); border-color: var(--legs);  color: var(--legs); }
 
+  /* PLAN SWITCHER */
+  .plan-switcher { display: flex; gap: 8px; padding: 12px 20px 0; }
+  .plan-pill { background: var(--bg2); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 9px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; flex: 1; text-align: center; }
+  .plan-pill:hover { border-color: var(--muted); color: var(--text); }
+  .plan-pill.active { background: var(--accent-dim2); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
   /* Session meta */
   .session-meta { display: flex; align-items: center; gap: 10px; padding: 14px 20px 0; flex-wrap: nowrap; }
   .session-label { font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); white-space: nowrap; }
@@ -407,6 +413,7 @@
   <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
 </div>
 
+<div class="plan-switcher" id="plan-switcher"></div>
 <div class="nav" id="day-nav"></div>
 <div class="main" id="main-content"></div>
 
@@ -512,63 +519,124 @@
 </div>
 
 <script>
-const DAYS = [
+const PPL_DAYS = [
   {
     id: 'upper', label: 'Montag', type: 'UPPER-BODY',
     color: 'upper', duration: '70–75 Min',
     exercises: [
-      { name: 'Brustpresse Maschine', muscle: 'Brust (mittel)', sets: 3, reps: '5–7', pause: '2:30', alternatives: ['Chest Fly Maschine', 'Kabel-Flyes mittig'] },
-      { name: 'Latzug neutral / eng', muscle: 'Latissimus', sets: 3, reps: '5–7', pause: '2:30', alternatives: ['Latzug Untergriff', 'Kabelrudern eng'] },
-      { name: 'Schrägbank-Brustpresse Maschine', muscle: 'Brust (oben)', sets: 2, reps: '6–8', pause: '2:00', alternatives: ['Kabel-Flyes tief nach oben', 'Chest Fly Maschine'] },
-      { name: 'Rudermaschine brustgestützt', muscle: 'Mittelrücken', sets: 2, reps: '6–8', pause: '2:00', alternatives: ['Kabelrudern weit', 'Seilzug-Rudern einarmig'] },
-      { name: 'Schulterdrücken Maschine', muscle: 'Schulter (vorne + seitlich)', sets: 3, reps: '6–8', pause: '2:00', alternatives: ['Kabel-Seitheben beidarmig', 'Arnold-Press Maschine'] },
-      { name: 'Kabelcurl', muscle: 'Bizeps', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Bizepscurl Maschine', 'Hammer Curl Kabel'] },
-      { name: 'Trizepsdrücken am Kabel', muscle: 'Trizeps', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Trizeps Maschine', 'Überkopf-Trizeps Kabel'] },
-      { name: 'Bizepscurl Maschine', muscle: 'Bizeps (Isolation)', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Kabelcurl einarmig', 'Konzentrationscurl Kabel'] },
-      { name: 'Überkopf-Trizeps am Kabel', muscle: 'Trizeps (langer Kopf)', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Trizepsdrücken Kabel (Seil)', 'Trizeps Dips Maschine'] },
+      { id: 'brustpresse_maschine', name: 'Brustpresse Maschine', muscle: 'Brust (mittel)', sets: 3, reps: '5–7', pause: '2:30', alternatives: ['Chest Fly Maschine', 'Kabel-Flyes mittig'] },
+      { id: 'latzug_neutral_eng', name: 'Latzug neutral / eng', muscle: 'Latissimus', sets: 3, reps: '5–7', pause: '2:30', alternatives: ['Latzug Untergriff', 'Kabelrudern eng'] },
+      { id: 'schraegbank_brustpresse_maschine', name: 'Schrägbank-Brustpresse Maschine', muscle: 'Brust (oben)', sets: 2, reps: '6–8', pause: '2:00', alternatives: ['Kabel-Flyes tief nach oben', 'Chest Fly Maschine'] },
+      { id: 'rudermaschine_brustgestuetzt', name: 'Rudermaschine brustgestützt', muscle: 'Mittelrücken', sets: 2, reps: '6–8', pause: '2:00', alternatives: ['Kabelrudern weit', 'Seilzug-Rudern einarmig'] },
+      { id: 'schulterdruecken_maschine', name: 'Schulterdrücken Maschine', muscle: 'Schulter (vorne + seitlich)', sets: 3, reps: '6–8', pause: '2:00', alternatives: ['Kabel-Seitheben beidarmig', 'Arnold-Press Maschine'] },
+      { id: 'kabelcurl', name: 'Kabelcurl', muscle: 'Bizeps', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Bizepscurl Maschine', 'Hammer Curl Kabel'] },
+      { id: 'trizepsdruecken_am_kabel', name: 'Trizepsdrücken am Kabel', muscle: 'Trizeps', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Trizeps Maschine', 'Überkopf-Trizeps Kabel'] },
+      { id: 'bizepscurl_maschine', name: 'Bizepscurl Maschine', muscle: 'Bizeps (Isolation)', sets: 2, reps: '8–10', pause: '75–90 Sek', alternatives: ['Kabelcurl einarmig', 'Konzentrationscurl Kabel'] },
+      { id: 'ueberkopf_trizeps_am_kabel', name: 'Überkopf-Trizeps am Kabel', muscle: 'Trizeps (langer Kopf)', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Trizepsdrücken Kabel (Seil)', 'Trizeps Dips Maschine'] },
     ]
   },
   {
     id: 'push', label: 'Mittwoch', type: 'PUSH',
     color: 'push', duration: '60–70 Min',
     exercises: [
-      { name: 'Brustpresse Maschine (anderer Winkel als Mo)', muscle: 'Brust', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Chest Fly Maschine', 'Kabel-Flyes mittig'] },
-      { name: 'Chest Fly Maschine / Kabel', muscle: 'Brust (Isolation)', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Kabel-Flyes hoch nach unten', 'Kabel-Flyes mittig'] },
-      { name: 'Kabel-Flyes tief nach oben', muscle: 'Brust (unten)', sets: 2, reps: '10–12', pause: '75 Sek', alternatives: ['Kabel-Flyes mittig', 'Chest Fly Maschine'] },
-      { name: 'Kabel-Seitheben einarmig', muscle: 'Schulter seitlich', sets: 3, reps: '12–15', pause: '60–75 Sek', alternatives: ['Seitheben Maschine', 'Kabel-Seitheben beidarmig'] },
-      { name: 'Trizepsdrücken am Kabel schwer', muscle: 'Trizeps', sets: 3, reps: '6–10', pause: '75–90 Sek', alternatives: ['Trizeps Maschine', 'Trizeps Dips Maschine'] },
-      { name: 'Überkopf-Trizeps am Kabel', muscle: 'Trizeps langer Kopf', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Trizepsdrücken Kabel (Seil)', 'Trizeps Maschine'] },
+      { id: 'brustpresse_maschine', name: 'Brustpresse Maschine (anderer Winkel als Mo)', muscle: 'Brust', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Chest Fly Maschine', 'Kabel-Flyes mittig'] },
+      { id: 'chest_fly_maschine', name: 'Chest Fly Maschine / Kabel', muscle: 'Brust (Isolation)', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Kabel-Flyes hoch nach unten', 'Kabel-Flyes mittig'] },
+      { id: 'kabel_flyes_tief_nach_oben', name: 'Kabel-Flyes tief nach oben', muscle: 'Brust (unten)', sets: 2, reps: '10–12', pause: '75 Sek', alternatives: ['Kabel-Flyes mittig', 'Chest Fly Maschine'] },
+      { id: 'kabel_seitheben_einarmig', name: 'Kabel-Seitheben einarmig', muscle: 'Schulter seitlich', sets: 3, reps: '12–15', pause: '60–75 Sek', alternatives: ['Seitheben Maschine', 'Kabel-Seitheben beidarmig'] },
+      { id: 'trizepsdruecken_am_kabel', name: 'Trizepsdrücken am Kabel schwer', muscle: 'Trizeps', sets: 3, reps: '6–10', pause: '75–90 Sek', alternatives: ['Trizeps Maschine', 'Trizeps Dips Maschine'] },
+      { id: 'ueberkopf_trizeps_am_kabel', name: 'Überkopf-Trizeps am Kabel', muscle: 'Trizeps langer Kopf', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Trizepsdrücken Kabel (Seil)', 'Trizeps Maschine'] },
     ]
   },
   {
     id: 'pull', label: 'Freitag', type: 'PULL',
     color: 'pull', duration: '65–75 Min',
     exercises: [
-      { name: 'Kabelrudern eng / mittig', muscle: 'Mittelrücken', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Kabelrudern weit', 'Rudermaschine brustgestützt'] },
-      { name: 'Latzug (anderer Griff als Mo)', muscle: 'Latissimus', sets: 3, reps: '6–8', pause: '2:00', alternatives: ['Latzug neutral', 'Kabelrudern eng überkopf'] },
-      { name: 'Rückenstrecker Maschine', muscle: 'Unterer Rücken', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Hyperextension Maschine', 'Kabel-Pull-Through'] },
-      { name: 'Reverse Fly Maschine / Kabel', muscle: 'Schulter hinten', sets: 3, reps: '12–15', pause: '60–75 Sek', alternatives: ['Reverse Fly Kabel', 'Facepull Kabel'] },
-      { name: 'Bizepscurl Maschine / Kabel', muscle: 'Bizeps', sets: 3, reps: '6–10', pause: '75–90 Sek', alternatives: ['Kabelcurl', 'Hammer Curl Kabel'] },
-      { name: 'Hammer Curl / Reverse Curl Kabel', muscle: 'Brachialis · Unterarm', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Reverse Curl Kabel', 'Bizepscurl Maschine'] },
+      { id: 'kabelrudern_eng', name: 'Kabelrudern eng / mittig', muscle: 'Mittelrücken', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Kabelrudern weit', 'Rudermaschine brustgestützt'] },
+      { id: 'latzug_freitag_variante', name: 'Latzug (anderer Griff als Mo)', muscle: 'Latissimus', sets: 3, reps: '6–8', pause: '2:00', alternatives: ['Latzug neutral', 'Kabelrudern eng überkopf'] },
+      { id: 'rueckenstrecker_maschine', name: 'Rückenstrecker Maschine', muscle: 'Unterer Rücken', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Hyperextension Maschine', 'Kabel-Pull-Through'] },
+      { id: 'reverse_fly_maschine', name: 'Reverse Fly Maschine / Kabel', muscle: 'Schulter hinten', sets: 3, reps: '12–15', pause: '60–75 Sek', alternatives: ['Reverse Fly Kabel', 'Facepull Kabel'] },
+      { id: 'bizepscurl_maschine', name: 'Bizepscurl Maschine / Kabel', muscle: 'Bizeps', sets: 3, reps: '6–10', pause: '75–90 Sek', alternatives: ['Kabelcurl', 'Hammer Curl Kabel'] },
+      { id: 'hammer_curl_kabel', name: 'Hammer Curl / Reverse Curl Kabel', muscle: 'Brachialis · Unterarm', sets: 2, reps: '8–12', pause: '75–90 Sek', alternatives: ['Reverse Curl Kabel', 'Bizepscurl Maschine'] },
     ]
   },
   {
     id: 'legs', label: 'Samstag', type: 'BEINE + CORE',
     color: 'legs', duration: '65–70 Min · optional',
     exercises: [
-      { name: 'Beinbeuger liegend', muscle: 'Hamstrings', sets: 3, reps: '6–8', pause: '3:00', alternatives: ['Beinbeuger sitzend', 'Kabel-Kickback'] },
-      { name: 'Beinpresse', muscle: 'Quadrizeps / Gluteus', sets: 3, reps: '5–7', pause: '3:00', alternatives: ['Hackenschmidt Maschine', 'Beinstrecker + Beinbeuger Supersatz'] },
-      { name: 'Beinstrecker', muscle: 'Quadrizeps (Isolation)', sets: 2, reps: '8–10', pause: '90 Sek', alternatives: ['Beinpresse einbeinig', 'Ausfallschritte Maschine'] },
-      { name: 'Abduktoren-Maschine', muscle: 'Gluteus medius · Hüfte', sets: 2, reps: '12–15', pause: '90 Sek', alternatives: ['Kabel Hip Abduction', 'Adduktoren-Maschine als Gegenpol'] },
-      { name: 'Wadenheben Maschine', muscle: 'Waden', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Wadenheben Beinpresse', 'Stehend Wadenheben Maschine'] },
-      { name: 'Cable Crunches', muscle: 'Bauch', sets: 3, reps: '10–15', pause: '60 Sek', alternatives: ['Crunch Maschine', 'Bauchpresse Maschine'] },
+      { id: 'beinbeuger_liegend', name: 'Beinbeuger liegend', muscle: 'Hamstrings', sets: 3, reps: '6–8', pause: '3:00', alternatives: ['Beinbeuger sitzend', 'Kabel-Kickback'] },
+      { id: 'beinpresse', name: 'Beinpresse', muscle: 'Quadrizeps / Gluteus', sets: 3, reps: '5–7', pause: '3:00', alternatives: ['Hackenschmidt Maschine', 'Beinstrecker + Beinbeuger Supersatz'] },
+      { id: 'beinstrecker', name: 'Beinstrecker', muscle: 'Quadrizeps (Isolation)', sets: 2, reps: '8–10', pause: '90 Sek', alternatives: ['Beinpresse einbeinig', 'Ausfallschritte Maschine'] },
+      { id: 'abduktoren_maschine', name: 'Abduktoren-Maschine', muscle: 'Gluteus medius · Hüfte', sets: 2, reps: '12–15', pause: '90 Sek', alternatives: ['Kabel Hip Abduction', 'Adduktoren-Maschine als Gegenpol'] },
+      { id: 'wadenheben_maschine', name: 'Wadenheben Maschine', muscle: 'Waden', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Wadenheben Beinpresse', 'Stehend Wadenheben Maschine'] },
+      { id: 'cable_crunches', name: 'Cable Crunches', muscle: 'Bauch', sets: 3, reps: '10–15', pause: '60 Sek', alternatives: ['Crunch Maschine', 'Bauchpresse Maschine'] },
     ]
   }
 ];
 
+const FULLBODY_DAYS = [
+  {
+    id: 'full_a', label: 'Montag', type: 'GANZKÖRPER A',
+    color: 'upper', duration: '70–75 Min',
+    exercises: [
+      { id: 'brustpresse_maschine', name: 'Brustpresse Maschine', muscle: 'Brust', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Chest Fly Maschine', 'Schrägbank-Brustpresse Maschine'] },
+      { id: 'latzug_neutral_eng', name: 'Latzug neutral / eng', muscle: 'Latissimus', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Kabelrudern eng', 'Rudermaschine brustgestützt'] },
+      { id: 'beinpresse', name: 'Beinpresse', muscle: 'Quadrizeps / Gluteus', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Hackenschmidt Maschine', 'Beinstrecker'] },
+      { id: 'schulterdruecken_maschine', name: 'Schulterdrücken Maschine', muscle: 'Schulter vorne/seitlich', sets: 2, reps: '8–10', pause: '2:00', alternatives: ['Kabel-Seitheben einarmig', 'Arnold-Press Maschine'] },
+      { id: 'kabelcurl', name: 'Kabelcurl', muscle: 'Bizeps', sets: 2, reps: '8–10', pause: '90 Sek', alternatives: ['Bizepscurl Maschine', 'Hammer Curl Kabel'] },
+      { id: 'trizepsdruecken_am_kabel', name: 'Trizepsdrücken am Kabel', muscle: 'Trizeps', sets: 2, reps: '8–10', pause: '90 Sek', alternatives: ['Trizeps Maschine', 'Überkopf-Trizeps am Kabel'] },
+      { id: 'wadenheben_maschine', name: 'Wadenheben Maschine', muscle: 'Waden', sets: 2, reps: '12–15', pause: '75 Sek', alternatives: ['Wadenheben Beinpresse'] },
+      { id: 'cable_crunches', name: 'Cable Crunches', muscle: 'Bauch', sets: 2, reps: '12–15', pause: '60 Sek', alternatives: ['Crunch Maschine'] },
+    ]
+  },
+  {
+    id: 'full_b', label: 'Mittwoch', type: 'GANZKÖRPER B',
+    color: 'push', duration: '70–75 Min',
+    exercises: [
+      { id: 'kabelrudern_eng', name: 'Kabelrudern eng / mittig', muscle: 'Mittelrücken', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Kabelrudern weit', 'Rudermaschine brustgestützt'] },
+      { id: 'chest_fly_maschine', name: 'Chest Fly Maschine', muscle: 'Brust (Isolation)', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Kabel-Flyes tief nach oben', 'Kabel-Flyes mittig'] },
+      { id: 'beinbeuger_liegend', name: 'Beinbeuger liegend', muscle: 'Hamstrings', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Beinbeuger sitzend'] },
+      { id: 'reverse_fly_maschine', name: 'Reverse Fly Maschine', muscle: 'Schulter hinten', sets: 2, reps: '10–12', pause: '75 Sek', alternatives: ['Reverse Fly Kabel', 'Facepull Kabel'] },
+      { id: 'bizepscurl_maschine', name: 'Bizepscurl Maschine', muscle: 'Bizeps', sets: 2, reps: '8–10', pause: '90 Sek', alternatives: ['Kabelcurl', 'Hammer Curl Kabel'] },
+      { id: 'ueberkopf_trizeps_am_kabel', name: 'Überkopf-Trizeps am Kabel', muscle: 'Trizeps (langer Kopf)', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Trizeps Maschine'] },
+      { id: 'beinstrecker', name: 'Beinstrecker', muscle: 'Quadrizeps (Isolation)', sets: 2, reps: '10–12', pause: '90 Sek', alternatives: ['Beinpresse einbeinig'] },
+      { id: 'sit_ups', name: 'Sit-ups', muscle: 'Bauch', sets: 2, reps: '12–15', pause: '60 Sek', alternatives: ['Cable Crunches', 'Beinheben hängend'] },
+    ]
+  },
+  {
+    id: 'full_c', label: 'Freitag', type: 'GANZKÖRPER C',
+    color: 'pull', duration: '70–75 Min',
+    exercises: [
+      { id: 'schraegbank_brustpresse_maschine', name: 'Schrägbank-Brustpresse Maschine', muscle: 'Brust (oben)', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Chest Fly Maschine'] },
+      { id: 'rudermaschine_brustgestuetzt', name: 'Rudermaschine brustgestützt', muscle: 'Mittelrücken', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Kabelrudern weit'] },
+      { id: 'hackenschmidt_maschine', name: 'Hackenschmidt Maschine', muscle: 'Quadrizeps / Gluteus', sets: 3, reps: '6–8', pause: '2:30', alternatives: ['Beinpresse', 'Ausfallschritte Maschine'] },
+      { id: 'kabel_seitheben_einarmig', name: 'Kabel-Seitheben einarmig', muscle: 'Schulter seitlich', sets: 2, reps: '12–15', pause: '75 Sek', alternatives: ['Seitheben Maschine'] },
+      { id: 'hammer_curl_kabel', name: 'Hammer Curl Kabel', muscle: 'Bizeps / Brachialis', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Bizepscurl Maschine'] },
+      { id: 'trizeps_dips_maschine', name: 'Trizeps Dips Maschine', muscle: 'Trizeps', sets: 2, reps: '8–12', pause: '90 Sek', alternatives: ['Trizepsdrücken am Kabel'] },
+      { id: 'wadenheben_beinpresse', name: 'Wadenheben Beinpresse', muscle: 'Waden', sets: 2, reps: '12–15', pause: '75 Sek', alternatives: ['Wadenheben Maschine'] },
+      { id: 'rueckenstrecker_maschine', name: 'Rückenstrecker Maschine', muscle: 'Unterer Rücken', sets: 2, reps: '10–12', pause: '90 Sek', alternatives: ['Hyperextension Maschine'] },
+    ]
+  }
+];
+
+// Jeder Plan definiert seine Trainingstage + welcher Wochentag (JS: So=0..Sa=6) zu welchem Tag gehört
+const PLAN_DEFS = {
+  ppl: { id: 'ppl', name: 'Upper / Push / Pull', shortName: 'Upper/Push/Pull', days: PPL_DAYS, schedule: { upper: 1, push: 3, pull: 5 } },
+  fullbody: { id: 'fullbody', name: 'Ganzkörper A/B/C', shortName: 'Ganzkörper', days: FULLBODY_DAYS, schedule: { full_a: 1, full_b: 3, full_c: 5 } }
+};
+
+// Einheitliche Farben für alle Tag-IDs über alle Pläne hinweg (Kalender/Statistik bleiben konsistent)
+const DAY_COLOR_MAP = {
+  upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f',
+  full_a: '#c9a84c', full_b: '#5dcaa5', full_c: '#e8935a'
+};
+
+let activePlanId = localStorage.getItem('gymbook:activeplan') || 'ppl';
+let DAYS = PLAN_DEFS[activePlanId].days;
+
 let currentDay = 0;
 let sessionData = {};
 let swappedExercises = {};
+let swappedExerciseIds = {};
 let activeDate = null; // null = heute
 let dirty = false;
 
@@ -615,13 +683,15 @@ async function cloudPull() {
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
+    loadActivePlan();
     loadCustomPlan();
     loadCustomCatalog();
     loadPauseSettings();
     setStatus('☁ Synchronisiert', true);
     renderNav();
     if (currentTab === 'home') renderHome();
-    else renderDay();  } catch(e) {
+    else { renderPlanSwitcher(); renderDay(); }
+  } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
   }
@@ -702,10 +772,12 @@ function loadSessionData() {
   const existing = storageGet(getKey(day.id, date));
   sessionData = {};
   swappedExercises = {};
+  swappedExerciseIds = {};
   if (existing) {
     if (existing.sets) {
       sessionData = existing.sets;
       swappedExercises = existing.swapped || {};
+      swappedExerciseIds = existing.swappedIds || {};
     } else {
       sessionData = existing;
     }
@@ -723,7 +795,19 @@ function saveSession() {
   const day = DAYS[currentDay];
   const date = activeDateStr();
   collectInputValues();
-  storageSet(getKey(day.id, date), { sets: sessionData, swapped: swappedExercises });
+
+  // Record id + name for every slot (swapped or plan-default) so future
+  // lookups are fully self-contained — independent of whichever plan/DAYS
+  // structure is active later.
+  const slotMeta = {};
+  day.exercises.forEach((ex, ei) => {
+    slotMeta[ei] = {
+      id: swappedExerciseIds[ei] || ex.id || slugify(ex.name),
+      name: swappedExercises[ei] || ex.name
+    };
+  });
+
+  storageSet(getKey(day.id, date), { sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds, meta: slotMeta });
   dirty = false;
   const el = document.getElementById('save-status');
   const isBack = date !== todayStr();
@@ -757,31 +841,6 @@ function getHistory(dayId) {
   }).sort((a,b) => b.date.localeCompare(a.date));
 }
 
-function getLastEntryByName(dayId, exerciseName) {
-  const date = activeDateStr();
-  const keys = storageGetAllKeys()
-    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date))
-    .sort().reverse();
-
-  for (const k of keys) {
-    const raw = storageGet(k);
-    if (!raw) continue;
-    const sets = raw.sets || raw;
-    const swapped = raw.swapped || {};
-    const day = DAYS.find(d => d.id === dayId);
-    if (!day) continue;
-
-    // Find which slot had this exercise name (original or swapped)
-    for (let ei = 0; ei < day.exercises.length; ei++) {
-      const slotName = swapped[ei] || day.exercises[ei].name;
-      if (slotName === exerciseName && sets[ei]?.sets?.length) {
-        return sets[ei].sets;
-      }
-    }
-  }
-  return null;
-}
-
 function getLastEntry(dayId, exIndex) {
   // Legacy fallback by index
   const date = activeDateStr();
@@ -795,6 +854,85 @@ function getLastEntry(dayId, exIndex) {
   if (!sets[exIndex]) return null;
   return sets[exIndex].sets;
 }
+
+// ── ID-BASIERTE HISTORIE (plan-übergreifend) ──────────────────
+// Sucht über ALLE Tage/Pläne hinweg nach der letzten Session für eine
+// Übungs-ID. Fällt für alte Einträge ohne gespeicherte ID auf den
+// namensbasierten Weg zurück (nur innerhalb des aktuell aktiven Plans).
+function getLastEntryById(exerciseId, exerciseName) {
+  const date = activeDateStr();
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    return p.length === 3 && !['customplan','customcatalog','pausesettings','offlinequeue'].includes(p[1])
+      && !p[1].startsWith('note') && !p[1].startsWith('binId') && !k.endsWith(date);
+  }).sort().reverse();
+
+  for (const k of allKeys) {
+    const raw = storageGet(k);
+    if (!raw) continue;
+    const sets = raw.sets || raw;
+    const metaMap = raw.meta || null;
+
+    if (metaMap) {
+      // Neue Struktur: direkte ID-Zuordnung, komplett plan-unabhängig
+      for (const ei in metaMap) {
+        if (metaMap[ei].id === exerciseId && sets[ei]?.sets?.length) {
+          return sets[ei].sets;
+        }
+      }
+    } else {
+      // Legacy: kein meta-Feld gespeichert – über Namen + aktuellen DAYS-Stand suchen
+      const dayId = k.split(':')[1];
+      const day = DAYS.find(d => d.id === dayId);
+      if (!day) continue;
+      const swapped = raw.swapped || {};
+      for (let ei = 0; ei < day.exercises.length; ei++) {
+        const slotName = swapped[ei] || day.exercises[ei].name;
+        if (slotName === exerciseName && sets[ei]?.sets?.length) {
+          return sets[ei].sets;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function getPersonalRecordById(exerciseId, exerciseName) {
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    return p.length === 3 && !['customplan','customcatalog','pausesettings','offlinequeue'].includes(p[1])
+      && !p[1].startsWith('note') && !p[1].startsWith('binId');
+  });
+  let best = 0;
+  allKeys.forEach(k => {
+    const raw = storageGet(k);
+    if (!raw) return;
+    const sets = raw.sets || raw;
+    const metaMap = raw.meta || null;
+
+    if (metaMap) {
+      for (const ei in metaMap) {
+        if (metaMap[ei].id !== exerciseId) continue;
+        const exSets = sets[ei]?.sets || [];
+        exSets.forEach(s => { const w = parseFloat(s.weight); if (!isNaN(w) && w > best) best = w; });
+      }
+    } else {
+      // Legacy fallback über Namen
+      const dayId = k.split(':')[1];
+      const day = DAYS.find(d => d.id === dayId);
+      if (!day) return;
+      const swapped = raw.swapped || {};
+      day.exercises.forEach((ex, ei) => {
+        const name = swapped[ei] || ex.name;
+        if (name !== exerciseName) return;
+        const exSets = sets[ei]?.sets || [];
+        exSets.forEach(s => { const w = parseFloat(s.weight); if (!isNaN(w) && w > best) best = w; });
+      });
+    }
+  });
+  return best;
+}
+// ─────────────────────────────────────────────────────────────
 
 // ── SKIP EXERCISE ─────────────────────────────────────────────
 const SKIP_REASONS = [
@@ -914,6 +1052,20 @@ function adjustSets(ei, delta) {
 }
 
 // ── ÜBUNGSKATALOG ────────────────────────────────────────────
+function slugify(name) {
+  let s = name.toLowerCase();
+  s = s.replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss');
+  s = s.replace(/[^a-z0-9]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return s;
+}
+
+function makeUniqueId(baseId, existingIds) {
+  let id = baseId;
+  let i = 2;
+  while (existingIds.has(id)) { id = `${baseId}_${i}`; i++; }
+  return id;
+}
+
 const CATALOG = {
   brust: {
     label: 'Brust',
@@ -922,7 +1074,7 @@ const CATALOG = {
       <ellipse cx="40" cy="28" rx="13" ry="9" fill="currentColor" opacity="0.9"/>
       <rect x="27" y="22" width="6" height="12" rx="2" fill="var(--bg3)"/>
     </svg>`,
-    exercises: ['Brustpresse Maschine','Schrägbank-Brustpresse Maschine','Chest Fly Maschine','Kabel-Flyes mittig','Kabel-Flyes hoch nach unten','Kabel-Flyes tief nach oben','Dips Maschine','Bankdrücken Langhantel','Schrägbankdrücken Langhantel','Kurzhantel Flyes']
+    exercises: [{id:'brustpresse_maschine',name:'Brustpresse Maschine'},{id:'schraegbank_brustpresse_maschine',name:'Schrägbank-Brustpresse Maschine'},{id:'chest_fly_maschine',name:'Chest Fly Maschine'},{id:'kabel_flyes_mittig',name:'Kabel-Flyes mittig'},{id:'kabel_flyes_hoch_nach_unten',name:'Kabel-Flyes hoch nach unten'},{id:'kabel_flyes_tief_nach_oben',name:'Kabel-Flyes tief nach oben'},{id:'dips_maschine',name:'Dips Maschine'},{id:'bankdruecken_langhantel',name:'Bankdrücken Langhantel'},{id:'schraegbankdruecken_langhantel',name:'Schrägbankdrücken Langhantel'},{id:'kurzhantel_flyes',name:'Kurzhantel Flyes'}]
   },
   ruecken: {
     label: 'Rücken',
@@ -932,7 +1084,7 @@ const CATALOG = {
       <rect x="40" y="16" width="10" height="28" rx="3" fill="currentColor" opacity="0.9"/>
       <rect x="26" y="14" width="8" height="32" rx="2" fill="currentColor" opacity="0.5"/>
     </svg>`,
-    exercises: ['Latzug neutral / eng','Latzug Untergriff','Latzug weit','Kabelrudern eng','Kabelrudern weit','Rudermaschine brustgestützt','Seilzug-Rudern einarmig','Rückenstrecker Maschine','Hyperextension Maschine','Kabel-Pull-Through','Rudern Langhantel','Rudern Kurzhantel einarmig','Klimmzüge']
+    exercises: [{id:'latzug_neutral_eng',name:'Latzug neutral / eng'},{id:'latzug_untergriff',name:'Latzug Untergriff'},{id:'latzug_weit',name:'Latzug weit'},{id:'kabelrudern_eng',name:'Kabelrudern eng'},{id:'kabelrudern_weit',name:'Kabelrudern weit'},{id:'rudermaschine_brustgestuetzt',name:'Rudermaschine brustgestützt'},{id:'seilzug_rudern_einarmig',name:'Seilzug-Rudern einarmig'},{id:'rueckenstrecker_maschine',name:'Rückenstrecker Maschine'},{id:'hyperextension_maschine',name:'Hyperextension Maschine'},{id:'kabel_pull_through',name:'Kabel-Pull-Through'},{id:'rudern_langhantel',name:'Rudern Langhantel'},{id:'rudern_kurzhantel_einarmig',name:'Rudern Kurzhantel einarmig'},{id:'klimmzuege',name:'Klimmzüge'}]
   },
   schulter: {
     label: 'Schulter',
@@ -941,7 +1093,7 @@ const CATALOG = {
       <circle cx="48" cy="24" r="9" fill="currentColor" opacity="0.9"/>
       <rect x="22" y="20" width="16" height="8" rx="3" fill="currentColor" opacity="0.4"/>
     </svg>`,
-    exercises: ['Schulterdrücken Maschine','Kabel-Seitheben einarmig','Kabel-Seitheben beidarmig','Seitheben Maschine','Reverse Fly Maschine','Reverse Fly Kabel','Facepull Kabel','Arnold-Press Maschine','Frontheben Kabel','Schulterdrücken Kurzhantel','Seitheben Kurzhantel','Frontheben Kurzhantel']
+    exercises: [{id:'schulterdruecken_maschine',name:'Schulterdrücken Maschine'},{id:'kabel_seitheben_einarmig',name:'Kabel-Seitheben einarmig'},{id:'kabel_seitheben_beidarmig',name:'Kabel-Seitheben beidarmig'},{id:'seitheben_maschine',name:'Seitheben Maschine'},{id:'reverse_fly_maschine',name:'Reverse Fly Maschine'},{id:'reverse_fly_kabel',name:'Reverse Fly Kabel'},{id:'facepull_kabel',name:'Facepull Kabel'},{id:'arnold_press_maschine',name:'Arnold-Press Maschine'},{id:'frontheben_kabel',name:'Frontheben Kabel'},{id:'schulterdruecken_kurzhantel',name:'Schulterdrücken Kurzhantel'},{id:'seitheben_kurzhantel',name:'Seitheben Kurzhantel'},{id:'frontheben_kurzhantel',name:'Frontheben Kurzhantel'}]
   },
   bizeps: {
     label: 'Bizeps',
@@ -951,7 +1103,7 @@ const CATALOG = {
       <ellipse cx="18" cy="26" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
       <ellipse cx="42" cy="26" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
     </svg>`,
-    exercises: ['Kabelcurl','Bizepscurl Maschine','Hammer Curl Kabel','Hammer Curl einarmig','Reverse Curl Kabel','Kabelcurl einarmig','Konzentrationscurl Kabel','Bizepscurl Langhantel','Bizepscurl Kurzhantel','Hammer Curl Kurzhantel','Schrägbankscurl Kurzhantel']
+    exercises: [{id:'kabelcurl',name:'Kabelcurl'},{id:'bizepscurl_maschine',name:'Bizepscurl Maschine'},{id:'hammer_curl_kabel',name:'Hammer Curl Kabel'},{id:'hammer_curl_einarmig',name:'Hammer Curl einarmig'},{id:'reverse_curl_kabel',name:'Reverse Curl Kabel'},{id:'kabelcurl_einarmig',name:'Kabelcurl einarmig'},{id:'konzentrationscurl_kabel',name:'Konzentrationscurl Kabel'},{id:'bizepscurl_langhantel',name:'Bizepscurl Langhantel'},{id:'bizepscurl_kurzhantel',name:'Bizepscurl Kurzhantel'},{id:'hammer_curl_kurzhantel',name:'Hammer Curl Kurzhantel'},{id:'schraegbankscurl_kurzhantel',name:'Schrägbankscurl Kurzhantel'}]
   },
   trizeps: {
     label: 'Trizeps',
@@ -961,7 +1113,7 @@ const CATALOG = {
       <ellipse cx="18" cy="36" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
       <ellipse cx="42" cy="36" rx="5" ry="8" fill="currentColor" opacity="0.5"/>
     </svg>`,
-    exercises: ['Trizepsdrücken am Kabel','Überkopf-Trizeps am Kabel','Trizepsdrücken Kabel (Seil)','Trizeps Maschine','Trizeps Dips Maschine','Trizeps Pushdown eng','Skull Crusher Langhantel','Trizeps Kurzhantel overhead','Dips Körpergewicht']
+    exercises: [{id:'trizepsdruecken_am_kabel',name:'Trizepsdrücken am Kabel'},{id:'ueberkopf_trizeps_am_kabel',name:'Überkopf-Trizeps am Kabel'},{id:'trizepsdruecken_kabel_seil',name:'Trizepsdrücken Kabel (Seil)'},{id:'trizeps_maschine',name:'Trizeps Maschine'},{id:'trizeps_dips_maschine',name:'Trizeps Dips Maschine'},{id:'trizeps_pushdown_eng',name:'Trizeps Pushdown eng'},{id:'skull_crusher_langhantel',name:'Skull Crusher Langhantel'},{id:'trizeps_kurzhantel_overhead',name:'Trizeps Kurzhantel overhead'},{id:'dips_koerpergewicht',name:'Dips Körpergewicht'}]
   },
   beine: {
     label: 'Beine',
@@ -971,7 +1123,7 @@ const CATALOG = {
       <rect x="15" y="34" width="10" height="18" rx="4" fill="currentColor" opacity="0.7"/>
       <rect x="35" y="34" width="10" height="18" rx="4" fill="currentColor" opacity="0.7"/>
     </svg>`,
-    exercises: ['Beinpresse','Hackenschmidt Maschine','Beinstrecker','Beinbeuger liegend','Beinbeuger sitzend','Abduktoren-Maschine','Adduktoren-Maschine','Wadenheben Maschine','Wadenheben Beinpresse','Kabel Hip Abduction','Kabel-Kickback','Ausfallschritte Maschine','Kniebeuge Langhantel','Romanian Deadlift']
+    exercises: [{id:'beinpresse',name:'Beinpresse'},{id:'hackenschmidt_maschine',name:'Hackenschmidt Maschine'},{id:'beinstrecker',name:'Beinstrecker'},{id:'beinbeuger_liegend',name:'Beinbeuger liegend'},{id:'beinbeuger_sitzend',name:'Beinbeuger sitzend'},{id:'abduktoren_maschine',name:'Abduktoren-Maschine'},{id:'adduktoren_maschine',name:'Adduktoren-Maschine'},{id:'wadenheben_maschine',name:'Wadenheben Maschine'},{id:'wadenheben_beinpresse',name:'Wadenheben Beinpresse'},{id:'kabel_hip_abduction',name:'Kabel Hip Abduction'},{id:'kabel_kickback',name:'Kabel-Kickback'},{id:'ausfallschritte_maschine',name:'Ausfallschritte Maschine'},{id:'kniebeuge_langhantel',name:'Kniebeuge Langhantel'},{id:'romanian_deadlift',name:'Romanian Deadlift'}]
   },
   bauch: {
     label: 'Bauch',
@@ -984,7 +1136,7 @@ const CATALOG = {
       <rect x="23" y="31" width="6" height="6" rx="1.5" fill="currentColor" opacity="0.7"/>
       <rect x="31" y="31" width="6" height="6" rx="1.5" fill="currentColor" opacity="0.7"/>
     </svg>`,
-    exercises: ['Cable Crunches','Crunch Maschine','Bauchpresse Maschine','Kabel-Crunch stehend','Sit-ups','Beinheben hängend','Russian Twists','Plank']
+    exercises: [{id:'cable_crunches',name:'Cable Crunches'},{id:'crunch_maschine',name:'Crunch Maschine'},{id:'bauchpresse_maschine',name:'Bauchpresse Maschine'},{id:'kabel_crunch_stehend',name:'Kabel-Crunch stehend'},{id:'sit_ups',name:'Sit-ups'},{id:'beinheben_haengend',name:'Beinheben hängend'},{id:'russian_twists',name:'Russian Twists'},{id:'plank',name:'Plank'}]
   }
 };
 
@@ -993,9 +1145,17 @@ let catalogActiveMuscle = 'brust';
 
 function getMuscleCategoryForExercise(exerciseName) {
   for (const [key, cat] of Object.entries(CATALOG)) {
-    if (cat.exercises.includes(exerciseName)) return key;
+    if (cat.exercises.some(e => e.name === exerciseName)) return key;
   }
   return 'brust';
+}
+
+function getExerciseIdByName(exerciseName) {
+  for (const cat of Object.values(CATALOG)) {
+    const found = cat.exercises.find(e => e.name === exerciseName);
+    if (found) return found.id;
+  }
+  return null;
 }
 
 function openCatalog(ei) {
@@ -1025,21 +1185,23 @@ function renderCatalog() {
     </button>
   `).join('');
 
-  const exercises = CATALOG[catalogActiveMuscle].exercises.map(name => {
+  const exercises = CATALOG[catalogActiveMuscle].exercises.map(exObj => {
+    const name = exObj.name;
     const isActive = swappedName === name;
     const isOriginal = ex.name === name;
     const safeName = name.replace(/'/g, "\\'");
+    const exId = exObj.id;
     if (catalogEditMode) {
       return `
         <div class="cat-ex-row ${isOriginal ? 'cat-ex-active' : ''}">
-          <span class="cat-ex-name" onclick="applySwap(${ei}, '${safeName}')" style="flex:1;cursor:pointer">${name}${isOriginal ? ' <span class="cat-active-badge">Aktuell</span>' : ''}</span>
-          <span class="cat-ex-arrow" onclick="applySwap(${ei}, '${safeName}')" style="cursor:pointer;margin-right:10px">${isOriginal ? '✓' : '→'}</span>
+          <span class="cat-ex-name" onclick="applySwap(${ei}, '${safeName}', '${exId}')" style="flex:1;cursor:pointer">${name}${isOriginal ? ' <span class="cat-active-badge">Aktuell</span>' : ''}</span>
+          <span class="cat-ex-arrow" onclick="applySwap(${ei}, '${safeName}', '${exId}')" style="cursor:pointer;margin-right:10px">${isOriginal ? '✓' : '→'}</span>
           <button onclick="deleteFromCatalog('${safeName}', event)" style="background:none;border:none;color:var(--muted2);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:color 0.15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'">✕</button>
         </div>
       `;
     }
     return `
-      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, '${safeName}')">
+      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, '${safeName}', '${exId}')">
         <span class="cat-ex-name">${name}${isOriginal ? ' <span class="cat-original-badge">Original</span>' : ''}${isActive ? ' <span class="cat-active-badge">Aktiv</span>' : ''}</span>
         <span class="cat-ex-arrow">${isActive ? '✓' : '→'}</span>
       </div>
@@ -1065,7 +1227,7 @@ function deleteFromCatalog(name, event) {
   event.stopPropagation();
   if (!confirm(`"${name}" aus dem Katalog entfernen?`)) return;
   const key = catalogActiveMuscle;
-  const idx = CATALOG[key].exercises.indexOf(name);
+  const idx = CATALOG[key].exercises.findIndex(e => e.name === name);
   if (idx > -1) {
     CATALOG[key].exercises.splice(idx, 1);
     saveCustomCatalog();
@@ -1078,28 +1240,32 @@ function setCatalogMuscle(key) {
   renderCatalog();
 }
 
-function applySwap(ei, altName) {
+function applySwap(ei, altName, altId) {
   // Save scroll position before re-render
   const scrollY = document.getElementById('main-content')?.scrollTop || window.scrollY;
+  const resolvedId = altId || getExerciseIdByName(altName) || slugify(altName);
 
   if (catalogEditMode) {
     const di = catalogTargetDi;
     let muscle = DAYS[di].exercises[ei].muscle;
     for (const [key, cat] of Object.entries(CATALOG)) {
-      if (cat.exercises.includes(altName)) { muscle = cat.label; break; }
+      if (cat.exercises.some(e => e.name === altName)) { muscle = cat.label; break; }
     }
     if (editDraft) {
       editDraft[di].exercises[ei].name = altName;
       editDraft[di].exercises[ei].muscle = muscle;
+      editDraft[di].exercises[ei].id = resolvedId;
     }
     DAYS[di].exercises[ei].name = altName;
     DAYS[di].exercises[ei].muscle = muscle;
+    DAYS[di].exercises[ei].id = resolvedId;
     catalogEditMode = false;
     closeCatalog();
     renderDay();
     return;
   }
   swappedExercises[ei] = altName;
+  swappedExerciseIds[ei] = resolvedId;
   autoSave();
   closeCatalog();
   renderDay();
@@ -1115,6 +1281,7 @@ function applySwap(ei, altName) {
 
 function resetSwap(ei) {
   delete swappedExercises[ei];
+  delete swappedExerciseIds[ei];
   autoSave();
   renderDay();
   setTimeout(() => {
@@ -1177,7 +1344,15 @@ async function saveCustomPlan() {
       if (ex.step) DAYS[di].exercises[ei].step = ex.step;
     });
   });
-  storageSet('gymbook:customplan', JSON.stringify(DAYS));
+
+  // Pläne sind pro Plan-ID getrennt gespeichert, damit ein Wechsel nichts überschreibt
+  const allCustomPlans = (() => {
+    const saved = storageGet('gymbook:customplan');
+    if (!saved) return {};
+    try { return typeof saved === 'string' ? JSON.parse(saved) : saved; } catch(e) { return {}; }
+  })();
+  allCustomPlans[activePlanId] = DAYS;
+  storageSet('gymbook:customplan', JSON.stringify(allCustomPlans));
   saveCustomCatalog();
 
   // Exit edit mode cleanly
@@ -1192,11 +1367,49 @@ async function saveCustomPlan() {
   setTimeout(() => setStatus('☁ Synchronisiert', true), 2000);
 }
 
+function loadActivePlan() {
+  const saved = storageGet('gymbook:activeplan');
+  if (saved && PLAN_DEFS[saved]) {
+    activePlanId = saved;
+    DAYS = PLAN_DEFS[activePlanId].days;
+  }
+}
+
+function switchPlan(planId) {
+  if (!PLAN_DEFS[planId] || planId === activePlanId) return;
+  if (editMode) {
+    if (!confirm('Du bist noch im Bearbeitungsmodus. Änderungen werden verworfen. Trotzdem wechseln?')) return;
+    editMode = false;
+    editDraft = null;
+  }
+  activePlanId = planId;
+  DAYS = PLAN_DEFS[activePlanId].days;
+  storageSet('gymbook:activeplan', planId);
+  loadCustomPlan(); // eigene Anpassungen für diesen Plan laden, falls vorhanden
+  currentDay = 0;
+  activeDate = null;
+  sessionStartTime = null;
+  renderPlanSwitcher();
+  renderNav();
+  renderDay();
+  if (currentTab === 'home') renderHome();
+}
+
+function renderPlanSwitcher() {
+  const wrap = document.getElementById('plan-switcher');
+  if (!wrap) return;
+  wrap.innerHTML = Object.values(PLAN_DEFS).map(plan => `
+    <button class="plan-pill ${plan.id === activePlanId ? 'active' : ''}" onclick="switchPlan('${plan.id}')">${plan.shortName}</button>
+  `).join('');
+}
+
 function loadCustomPlan() {
   const saved = storageGet('gymbook:customplan');
   if (!saved) return;
   try {
-    const custom = JSON.parse(typeof saved === 'string' ? saved : JSON.stringify(saved));
+    const allCustomPlans = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    const custom = allCustomPlans[activePlanId];
+    if (!custom) return;
     // Restore plan – support added exercises
     custom.forEach((day, di) => {
       if (!DAYS[di]) return;
@@ -1256,31 +1469,37 @@ function addExercise(di) {
   const pause = document.getElementById('new-ex-pause').value.trim() || '90 Sek';
   if (!name) return;
 
-  const newEx = { name, muscle, sets, reps, pause, alternatives: [] };
+  // Generate a unique id for this new exercise
+  const allExistingIds = new Set();
+  Object.values(CATALOG).forEach(cat => cat.exercises.forEach(e => allExistingIds.add(e.id)));
+  const newId = makeUniqueId(slugify(name), allExistingIds);
+
+  const newEx = { id: newId, name, muscle, sets, reps, pause, alternatives: [] };
   DAYS[di].exercises.push(newEx);
   if (editDraft) editDraft[di].exercises.push({ ...newEx });
 
   // Also add to catalog if not already there
-  addToCatalog(name, muscle);
+  addToCatalog(name, muscle, newId);
 
   renderDay();
 }
 
-function addToCatalog(name, muscle) {
+function addToCatalog(name, muscle, exId) {
+  const id = exId || (() => {
+    const allExistingIds = new Set();
+    Object.values(CATALOG).forEach(cat => cat.exercises.forEach(e => allExistingIds.add(e.id)));
+    return makeUniqueId(slugify(name), allExistingIds);
+  })();
+
   // Find best matching catalog key by muscle label
   const key = Object.entries(CATALOG).find(([k, cat]) =>
     cat.label.toLowerCase() === muscle.toLowerCase() ||
     muscle.toLowerCase().includes(cat.label.toLowerCase())
   )?.[0];
 
-  if (key && !CATALOG[key].exercises.includes(name)) {
-    CATALOG[key].exercises.push(name);
-  } else if (!key) {
-    // Add to a custom category or the closest match – default to brust
-    const fallback = Object.keys(CATALOG)[0];
-    if (!CATALOG[fallback].exercises.includes(name)) {
-      CATALOG[fallback].exercises.push(name);
-    }
+  const targetKey = key || Object.keys(CATALOG)[0];
+  if (!CATALOG[targetKey].exercises.some(e => e.name === name)) {
+    CATALOG[targetKey].exercises.push({ id, name });
   }
 }
 
@@ -1440,8 +1659,9 @@ function renderDay() {
     const anyDone = sd.sets.some(s => s.done);
     const swappedName = swappedExercises[ei] || null;
     const displayName = swappedName || ex.name;
-    const lastEntry = getLastEntryByName(day.id, displayName) || getLastEntry(day.id, ei);
-    const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5, day.id, displayName);
+    const displayId = swappedExerciseIds[ei] || ex.id || slugify(ex.name);
+    const lastEntry = getLastEntryById(displayId, displayName) || getLastEntry(day.id, ei);
+    const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5, displayId, displayName);
 
     // Suggestion label
     let suggLabel = '';
@@ -1467,7 +1687,7 @@ function renderDay() {
 
       // Check catalog first with partial match
       for (const [key, cat] of Object.entries(CATALOG)) {
-        if (cat.exercises.some(e => nameLower.includes(e.toLowerCase()) || e.toLowerCase().includes(nameLower))) {
+        if (cat.exercises.some(e => nameLower.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(nameLower))) {
           const colors = {
             brust:   '#e87f7f',  // Rot
             trizeps: '#e8a060',  // Orange/Koralle
@@ -1650,27 +1870,47 @@ function parseRepRange(repsStr) {
   return { low: single, high: single };
 }
 
-function getLastEntriesByName(dayId, exerciseName, count) {
+function getLastEntriesById(exerciseId, exerciseName, count) {
   const date = activeDateStr();
-  const keys = storageGetAllKeys()
-    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date))
-    .sort().reverse().slice(0, count);
-  return keys.map(k => {
+  const allKeys = storageGetAllKeys().filter(k => {
+    const p = k.split(':');
+    return p.length === 3 && !['customplan','customcatalog','pausesettings','offlinequeue'].includes(p[1])
+      && !p[1].startsWith('note') && !p[1].startsWith('binId') && !k.endsWith(date);
+  }).sort().reverse();
+
+  const results = [];
+  for (const k of allKeys) {
+    if (results.length >= count) break;
     const raw = storageGet(k);
-    if (!raw) return null;
+    if (!raw) continue;
     const sets = raw.sets || raw;
-    const swapped = raw.swapped || {};
-    const day = DAYS.find(d => d.id === dayId);
-    if (!day) return null;
-    for (let ei = 0; ei < day.exercises.length; ei++) {
-      const slotName = swapped[ei] || day.exercises[ei].name;
-      if (slotName === exerciseName && sets[ei]?.sets?.length) return sets[ei].sets;
+    const metaMap = raw.meta || null;
+
+    if (metaMap) {
+      for (const ei in metaMap) {
+        if (metaMap[ei].id === exerciseId && sets[ei]?.sets?.length) {
+          results.push(sets[ei].sets);
+          break;
+        }
+      }
+    } else {
+      const dayId = k.split(':')[1];
+      const day = DAYS.find(d => d.id === dayId);
+      if (!day) continue;
+      const swapped = raw.swapped || {};
+      for (let ei = 0; ei < day.exercises.length; ei++) {
+        const slotName = swapped[ei] || day.exercises[ei].name;
+        if (slotName === exerciseName && sets[ei]?.sets?.length) {
+          results.push(sets[ei].sets);
+          break;
+        }
+      }
     }
-    return null;
-  }).filter(Boolean);
+  }
+  return results;
 }
 
-function calcWeightSuggestion(lastSets, repsTarget, step, dayId, exerciseName) {
+function calcWeightSuggestion(lastSets, repsTarget, step, exerciseId, exerciseName) {
   if (!lastSets || !lastSets.length) return null;
   const { high } = parseRepRange(repsTarget);
   const inc = step || 2.5;
@@ -1680,8 +1920,8 @@ function calcWeightSuggestion(lastSets, repsTarget, step, dayId, exerciseName) {
   let allExceeded = false;
   let anyExceeded = false;
 
-  if (dayId && exerciseName) {
-    const recent = getLastEntriesByName(dayId, exerciseName, 3);
+  if (exerciseId && exerciseName) {
+    const recent = getLastEntriesById(exerciseId, exerciseName, 3);
     if (recent.length >= 2) {
       const avgWeights = recent.map(sets => {
         const logged = sets.filter(s => s.weight);
@@ -1805,8 +2045,9 @@ function showTimerNextInfo(ei, s) {
   }
 
   const nextName = swappedExercises[nextEi] || nextEx.name;
-  const lastEntry = getLastEntryByName(day.id, nextName) || getLastEntry(day.id, nextEi);
-  const suggestion = calcWeightSuggestion(lastEntry, nextEx.reps, nextEx.step || 2.5, day.id, nextName);
+  const nextId = swappedExerciseIds[nextEi] || nextEx.id || slugify(nextEx.name);
+  const lastEntry = getLastEntryById(nextId, nextName) || getLastEntry(day.id, nextEi);
+  const suggestion = calcWeightSuggestion(lastEntry, nextEx.reps, nextEx.step || 2.5, nextId, nextName);
 
   // Get current weight/reps from last set of this exercise as default
   const prevSetData = sessionData[nextEi]?.sets?.[nextSet - 1] || sessionData[nextEi]?.sets?.[0];
@@ -1989,31 +2230,6 @@ function deleteSession() {
   setStatus('Einheit gelöscht', false);
 }
 
-function getPersonalRecord(exerciseName) {
-  const allKeys = storageGetAllKeys().filter(k => {
-    const p = k.split(':'); return p.length === 3 && !['customplan','customcatalog','pausesettings'].includes(p[1]);
-  });
-  let best = 0;
-  allKeys.forEach(k => {
-    const raw = storageGet(k);
-    if (!raw) return;
-    const sets = raw.sets || raw;
-    const swapped = raw.swapped || {};
-    DAYS.forEach((day, di) => {
-      day.exercises.forEach((ex, ei) => {
-        const name = swapped[ei] || ex.name;
-        if (name !== exerciseName) return;
-        const exSets = sets[ei]?.sets || [];
-        exSets.forEach(s => {
-          const w = parseFloat(s.weight);
-          if (!isNaN(w) && w > best) best = w;
-        });
-      });
-    });
-  });
-  return best;
-}
-
 function showPRCelebration(exerciseName, weight) {
   const el = document.createElement('div');
   el.style.cssText = `position:fixed;top:80px;left:50%;transform:translateX(-50%);background:#c9a84c;color:#090909;font-family:monospace;font-size:13px;font-weight:600;padding:10px 20px;border-radius:20px;z-index:999;white-space:nowrap;animation:prPop 0.3s ease`;
@@ -2079,7 +2295,8 @@ function toggleDone(ei, s) {
     if (!isNaN(weight) && weight > 0) {
       const ex = DAYS[currentDay].exercises[ei];
       const displayName = swappedExercises[ei] || ex.name;
-      const pr = getPersonalRecord(displayName);
+      const displayId = swappedExerciseIds[ei] || ex.id || slugify(ex.name);
+      const pr = getPersonalRecordById(displayId, displayName);
       if (weight > pr) showPRCelebration(displayName, weight);
     }
 
@@ -2424,7 +2641,7 @@ function switchTab(tab) {
   document.getElementById('tab-stats').classList.toggle('active', tab === 'stats');
   document.getElementById('save-bar').style.display = tab === 'training' ? 'flex' : 'none';
   if (tab === 'home') renderHome();
-  if (tab === 'training') renderDay();
+  if (tab === 'training') { renderPlanSwitcher(); renderDay(); }
   if (tab === 'stats') renderStats();
 }
 
@@ -2437,7 +2654,7 @@ function renderStats() {
   const month = now.getMonth();
   const monthNames = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
   const dayNames = ['Mo','Di','Mi','Do','Fr','Sa','So'];
-  const dayColors = { upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f' };
+  const dayColors = DAY_COLOR_MAP;
 
   // All completed keys for stats
   const allKeys = storageGetAllKeys().filter(k => {
@@ -2473,35 +2690,57 @@ function renderStats() {
     </div>`;
   }
 
-  // Progress stats
-  const weightHistory = {};
+  // Progress stats – gruppiert nach Übungs-ID (plan-übergreifend), Anzeige über Namen
+  const weightHistory = {}; // id -> { name, entries: [{weight}] }
   const volumeHistory = {};
   completedKeys.sort().forEach(k => {
     const raw = storageGet(k);
     if (!raw) return;
     const sets = raw.sets || raw;
-    const swapped = raw.swapped || {};
-    const dayId = k.split(':')[1];
+    const metaMap = raw.meta || null;
     const date = k.split(':')[2];
-    const day = DAYS.find(d => d.id === dayId);
-    if (!day) return;
     let dayVolume = 0;
-    day.exercises.forEach((ex, ei) => {
-      const name = swapped[ei] || ex.name;
-      const exSets = sets[ei]?.sets || [];
-      const maxW = Math.max(...exSets.map(s => parseFloat(s.weight) || 0));
-      if (maxW > 0) { if (!weightHistory[name]) weightHistory[name] = []; weightHistory[name].push({ weight: maxW }); }
-      exSets.forEach(s => { const w = parseFloat(s.weight)||0; const r = parseInt(s.reps)||0; if(w>0&&r>0) dayVolume+=w*r; });
-    });
+
+    if (metaMap) {
+      // Neue Struktur: id+name direkt aus der Session, keine DAYS-Abhängigkeit
+      Object.entries(metaMap).forEach(([ei, m]) => {
+        const exSets = sets[ei]?.sets || [];
+        const maxW = Math.max(...exSets.map(s => parseFloat(s.weight) || 0), 0);
+        if (maxW > 0) {
+          if (!weightHistory[m.id]) weightHistory[m.id] = { name: m.name, entries: [] };
+          weightHistory[m.id].entries.push({ weight: maxW });
+        }
+        exSets.forEach(s => { const w = parseFloat(s.weight)||0; const r = parseInt(s.reps)||0; if(w>0&&r>0) dayVolume+=w*r; });
+      });
+    } else {
+      // Legacy: kein meta-Feld – über aktuellen DAYS-Stand auflösen
+      const dayId = k.split(':')[1];
+      const day = DAYS.find(d => d.id === dayId);
+      if (!day) return;
+      const swapped = raw.swapped || {};
+      day.exercises.forEach((ex, ei) => {
+        const name = swapped[ei] || ex.name;
+        const id = ex.id || slugify(name);
+        const exSets = sets[ei]?.sets || [];
+        const maxW = Math.max(...exSets.map(s => parseFloat(s.weight) || 0), 0);
+        if (maxW > 0) {
+          if (!weightHistory[id]) weightHistory[id] = { name, entries: [] };
+          weightHistory[id].entries.push({ weight: maxW });
+        }
+        exSets.forEach(s => { const w = parseFloat(s.weight)||0; const r = parseInt(s.reps)||0; if(w>0&&r>0) dayVolume+=w*r; });
+      });
+    }
     if (dayVolume > 0) volumeHistory[date] = (volumeHistory[date]||0) + dayVolume;
   });
 
-  const bestLifts = {};
-  Object.entries(weightHistory).forEach(([name, entries]) => { bestLifts[name] = Math.max(...entries.map(e => e.weight)); });
+  const bestLifts = {}; // name -> weight (für Anzeige)
+  Object.values(weightHistory).forEach(({ name, entries }) => {
+    bestLifts[name] = Math.max(...entries.map(e => e.weight));
+  });
 
-  const progressExercises = Object.entries(weightHistory)
-    .filter(([,e]) => e.length >= 2)
-    .map(([name, entries]) => ({ name, diff: entries[entries.length-1].weight - entries[0].weight, last6: entries.slice(-6), first: entries[0].weight, last: entries[entries.length-1].weight }))
+  const progressExercises = Object.values(weightHistory)
+    .filter(({entries}) => entries.length >= 2)
+    .map(({name, entries}) => ({ name, diff: entries[entries.length-1].weight - entries[0].weight, last6: entries.slice(-6), first: entries[0].weight, last: entries[entries.length-1].weight }))
     .sort((a,b) => b.diff - a.diff).slice(0,5);
 
   const volumeEntries = Object.entries(volumeHistory).sort().slice(-8);
@@ -2603,7 +2842,11 @@ function renderStats() {
     <div style="margin-bottom:20px">
       <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">${monthNames[month]} ${year} · ${completedKeys.length} Einheiten gesamt</div>
       <div class="cal-legend" style="margin-bottom:10px">
-        ${Object.entries(dayColors).map(([id,color]) => { const d=DAYS.find(x=>x.id===id); return `<div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:9px;color:var(--muted)">${d?.type||id}</span></div>`; }).join('')}
+        ${Object.entries(dayColors).map(([id,color]) => {
+          const allDaysAcrossPlans = Object.values(PLAN_DEFS).flatMap(p => p.days);
+          const d = allDaysAcrossPlans.find(x => x.id === id);
+          return `<div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:9px;color:var(--muted)">${d?.type||id}</span></div>`;
+        }).join('')}
       </div>
       <div class="cal-header-row">${dayNames.map(d=>`<div class="cal-header-cell">${d}</div>`).join('')}</div>
       <div class="cal-grid">${cells}</div>
@@ -2631,7 +2874,7 @@ function renderStats() {
       DAYS.forEach(d => { sessionsByDay[d.id] = 0; });
       completedKeys.forEach(k => { const id = k.split(':')[1]; if (sessionsByDay[id] !== undefined) sessionsByDay[id]++; });
       const maxD = Math.max(...Object.values(sessionsByDay), 1);
-      const dayColors = { upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f' };
+      const dayColors = DAY_COLOR_MAP;
       return `<div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
         <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
         ${DAYS.map(d => `
@@ -2704,33 +2947,42 @@ function renderStats() {
 }
 
 function showDayDetail(dateStr) {
-  // Find which day this was
-  const dayEntry = Object.entries({ upper:1, push:3, pull:5, legs:6 }).find(([id, wd]) => {
-    const d = new Date(dateStr);
-    return (d.getDay() + 6) % 7 + 1 === wd || d.getDay() === wd;
-  });
-  // Show day details in a modal
   const allDayKeys = storageGetAllKeys().filter(k => k.endsWith(`:${dateStr}`));
   if (!allDayKeys.length) return;
   const k = allDayKeys[0];
   const dayId = k.split(':')[1];
   const day = DAYS.find(d => d.id === dayId);
-  if (!day) return;
   const raw = storageGet(k);
   const sets = raw?.sets || raw || {};
   const swapped = raw?.swapped || {};
+  const metaMap = raw?.meta || null;
   const noteKey = `gymbook:note:${dayId}:${dateStr}`;
   const note = storageGet(noteKey) || '';
-  let html = `<button class="modal-close" onclick="closeModal()">×</button><h2>${day.type} · ${formatDate(dateStr)}</h2><div style="margin-top:14px">`;
-  day.exercises.forEach((ex, ei) => {
-    const name = swapped[ei] || ex.name;
-    const skip = sets[ei]?.skipped;
-    if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--red)">✕ ${name}: ${skip.reason}</div>`; return; }
-    const exSets = sets[ei]?.sets || [];
-    const filled = exSets.filter(s => s.weight);
-    if (!filled.length) return;
-    html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${name}</div><div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${filled.map(s=>`${s.weight}kg×${s.reps||'?'}`).join(' · ')}</div></div>`;
-  });
+  const title = day ? day.type : (Object.values(PLAN_DEFS).flatMap(p => p.days).find(x => x.id === dayId)?.type || dayId.toUpperCase());
+  let html = `<button class="modal-close" onclick="closeModal()">×</button><h2>${title} · ${formatDate(dateStr)}</h2><div style="margin-top:14px">`;
+
+  if (metaMap) {
+    // Neue Struktur: unabhängig von der aktuellen DAYS-Struktur
+    Object.entries(metaMap).forEach(([ei, m]) => {
+      const skip = sets[ei]?.skipped;
+      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--red)">✕ ${m.name}: ${skip.reason}</div>`; return; }
+      const exSets = sets[ei]?.sets || [];
+      const filled = exSets.filter(s => s.weight);
+      if (!filled.length) return;
+      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${m.name}</div><div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${filled.map(s=>`${s.weight}kg×${s.reps||'?'}`).join(' · ')}</div></div>`;
+    });
+  } else if (day) {
+    // Legacy: kein meta-Feld – über aktuellen DAYS-Stand auflösen
+    day.exercises.forEach((ex, ei) => {
+      const name = swapped[ei] || ex.name;
+      const skip = sets[ei]?.skipped;
+      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--red)">✕ ${name}: ${skip.reason}</div>`; return; }
+      const exSets = sets[ei]?.sets || [];
+      const filled = exSets.filter(s => s.weight);
+      if (!filled.length) return;
+      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${name}</div><div style="font-family:var(--mono);font-size:11px;color:var(--muted)">${filled.map(s=>`${s.weight}kg×${s.reps||'?'}`).join(' · ')}</div></div>`;
+    });
+  }
   if (note) html += `<div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--accent);font-size:11px;color:var(--muted);font-style:italic">${note}</div>`;
   html += '</div>';
   document.getElementById('modal-content').innerHTML = html;
@@ -2746,11 +2998,12 @@ function renderHome() {
   document.getElementById('home-date').textContent = `${weekdays[now.getDay()]}, ${formatDate(todayStr())}`;
 
   // Next training day
-  const weekdayMap = { upper: 1, push: 3, pull: 5, legs: 6 };
+  const weekdayMap = PLAN_DEFS[activePlanId].schedule;
   const todayWd = now.getDay();
   let nextDay = null, nextDiff = 8;
   DAYS.forEach(d => {
     const target = weekdayMap[d.id];
+    if (target == null) return; // optionale Tage ohne festen Termin (z.B. Beine)
     let diff = (target - todayWd + 7) % 7;
     if (diff === 0) diff = 7;
     if (diff < nextDiff) { nextDiff = diff; nextDay = d; }
@@ -2804,21 +3057,35 @@ function renderHome() {
     const lastDate = lastKey.split(':')[2];
     const lastDay = DAYS.find(d => d.id === lastDayId);
     const raw = storageGet(lastKey);
-    if (raw && lastDay) {
+    if (raw) {
       const sets = raw.sets || raw;
-      const swapped = raw.swapped || {};
-      const entries = lastDay.exercises.slice(0, 4).map((ex, ei) => {
-        const name = swapped[ei] || ex.name;
-        const exSets = sets[ei]?.sets || [];
-        const filled = exSets.filter(s => s.weight);
-        if (!filled.length) return null;
-        const maxW = Math.max(...filled.map(s => parseFloat(s.weight)));
-        return { name, weight: maxW };
-      }).filter(Boolean).slice(0, 3);
+      const metaMap = raw.meta || null;
+      let entries = [];
 
+      if (metaMap) {
+        entries = Object.entries(metaMap).slice(0, 4).map(([ei, m]) => {
+          const exSets = sets[ei]?.sets || [];
+          const filled = exSets.filter(s => s.weight);
+          if (!filled.length) return null;
+          const maxW = Math.max(...filled.map(s => parseFloat(s.weight)));
+          return { name: m.name, weight: maxW };
+        }).filter(Boolean).slice(0, 3);
+      } else if (lastDay) {
+        const swapped = raw.swapped || {};
+        entries = lastDay.exercises.slice(0, 4).map((ex, ei) => {
+          const name = swapped[ei] || ex.name;
+          const exSets = sets[ei]?.sets || [];
+          const filled = exSets.filter(s => s.weight);
+          if (!filled.length) return null;
+          const maxW = Math.max(...filled.map(s => parseFloat(s.weight)));
+          return { name, weight: maxW };
+        }).filter(Boolean).slice(0, 3);
+      }
+
+      const titleType = lastDay ? lastDay.type : (Object.values(PLAN_DEFS).flatMap(p => p.days).find(x => x.id === lastDayId)?.type || lastDayId.toUpperCase());
       lastSessionHtml = `
         <div class="home-card">
-          <div class="home-card-title">Letztes Training · ${lastDay.type} · ${formatDate(lastDate)}</div>
+          <div class="home-card-title">Letztes Training · ${titleType} · ${formatDate(lastDate)}</div>
           ${entries.map(e => `
             <div class="home-last-ex">
               <span class="home-last-ex-name">${e.name}</span>
@@ -2836,8 +3103,22 @@ function renderHome() {
     const raw = storageGet(k);
     if (!raw) return;
     const sets = raw.sets || raw;
-    const swapped = raw.swapped || {};
-    DAYS.forEach((day, di) => {
+    const metaMap = raw.meta || null;
+
+    if (metaMap) {
+      Object.entries(metaMap).forEach(([ei, m]) => {
+        const exSets = sets[ei]?.sets || [];
+        exSets.forEach(s => {
+          const w = parseFloat(s.weight);
+          if (!isNaN(w) && w > 0 && (!bestLifts[m.name] || w > bestLifts[m.name])) bestLifts[m.name] = w;
+        });
+      });
+    } else {
+      // Legacy: nur den zum Key passenden Tag durchsuchen (nicht alle DAYS!)
+      const dayId = k.split(':')[1];
+      const day = DAYS.find(d => d.id === dayId);
+      if (!day) return;
+      const swapped = raw.swapped || {};
       day.exercises.forEach((ex, ei) => {
         const name = swapped[ei] || ex.name;
         const exSets = sets[ei]?.sets || [];
@@ -2846,21 +3127,21 @@ function renderHome() {
           if (!isNaN(w) && w > 0 && (!bestLifts[name] || w > bestLifts[name])) bestLifts[name] = w;
         });
       });
-    });
+    }
   });
   const topPRs = Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0, 3);
 
-  const weekPills = DAYS.filter(d => d.id !== 'legs').map(d => {
+  const weekdayShort = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const weekPills = DAYS.filter(d => weekdayMap[d.id] != null).map(d => {
     const wd = weekdayMap[d.id];
     const dateObj = new Date(weekStart);
     dateObj.setDate(weekStart.getDate() + wd - 1);
     const dateStr = dateObj.toISOString().slice(0,10);
     const done = !!storageGet(getKey(d.id, dateStr));
-    const labels = { upper: 'Mo', push: 'Mi', pull: 'Fr' };
     return `<div class="home-week-pill ${done ? 'done' : 'pending'}">
-      <div class="home-week-pill-label">${labels[d.id]}</div>
+      <div class="home-week-pill-label">${weekdayShort[wd]}</div>
       <div style="font-size:14px;margin-top:2px">${done ? '✓' : '○'}</div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:1px">${d.type.split('-')[0]}</div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:1px">${d.type.split('-')[0].split(' ')[0]}</div>
     </div>`;
   }).join('');
 
