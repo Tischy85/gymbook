@@ -274,6 +274,9 @@
   .cat-ex-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 0.5px solid var(--border); cursor: pointer; transition: background 0.1s; }
   .cat-ex-row:last-child { border-bottom: none; }
   .cat-ex-row:hover { background: var(--bg3); }
+  .ex-list-row { display: flex; align-items: center; background: var(--bg2); border: 0.5px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+  .ex-list-row:hover { border-color: var(--border2); }
+  .ex-list-row .ex-chevron { color: var(--muted2); }
   .cat-ex-row.cat-ex-active { background: var(--accent-dim); }
   .cat-ex-name { font-size: 13px; color: var(--text); flex: 1; }
   .cat-ex-arrow { font-family: var(--mono); font-size: 12px; color: var(--muted2); margin-left: 10px; }
@@ -445,6 +448,30 @@
   <div style="padding:14px 20px 120px" id="stats-content"></div>
 </div>
 
+<!-- EXERCISES PAGE -->
+<div id="exercises-page" style="display:none">
+  <div class="header">
+    <div class="header-left">
+      <h1 style="font-family:'Arial Narrow','Arial',sans-serif;font-size:30px;font-weight:900;letter-spacing:0.12em;line-height:1;text-transform:uppercase"><span style="color:var(--text)">GYM</span><span style="color:var(--accent)">BOOK</span></h1>
+      <p style="font-size:11px;color:var(--muted);font-family:monospace;margin-top:4px">Übungen</p>
+    </div>
+    <div class="header-right">
+      <button class="menu-btn" onclick="toggleMenu()">⋯</button>
+    </div>
+  </div>
+  <div style="padding:10px 20px 0" id="exercises-search-wrap">
+    <input type="text" id="exercises-search" placeholder="Übung suchen…" oninput="renderExercises()"
+      style="width:100%;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:11px 14px;border-radius:8px;outline:none;box-sizing:border-box">
+  </div>
+  <div class="cat-tabs" id="exercises-muscle-tabs" style="padding:12px 20px 0"></div>
+  <div style="padding:10px 20px 120px" id="exercises-content"></div>
+</div>
+
+<!-- EXERCISE DETAIL MODAL -->
+<div class="modal-overlay" id="exercise-detail-modal" style="display:none" onclick="if(event.target===this)closeExerciseDetail()">
+  <div class="modal" id="exercise-detail-content"></div>
+</div>
+
 <!-- TAB BAR -->
 <div class="tab-bar" id="tab-bar">
   <button class="tab-btn" id="tab-home" onclick="switchTab('home')">
@@ -464,6 +491,13 @@
       <line x1="12" y1="6.5" x2="12" y2="17.5"/>
     </svg>
     <span class="tab-label">Training</span>
+  </button>
+  <button class="tab-btn" id="tab-exercises" onclick="switchTab('exercises')">
+    <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v5l3 3"/>
+    </svg>
+    <span class="tab-label">Übungen</span>
   </button>
   <button class="tab-btn" id="tab-stats" onclick="switchTab('stats')">
     <svg class="tab-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -2677,15 +2711,165 @@ function switchTab(tab) {
   currentTab = tab;
   document.getElementById('home-page').style.display = tab === 'home' ? 'block' : 'none';
   document.getElementById('training-page').style.display = tab === 'training' ? 'block' : 'none';
+  document.getElementById('exercises-page').style.display = tab === 'exercises' ? 'block' : 'none';
   document.getElementById('stats-page').style.display = tab === 'stats' ? 'block' : 'none';
   document.getElementById('tab-home').classList.toggle('active', tab === 'home');
   document.getElementById('tab-training').classList.toggle('active', tab === 'training');
+  document.getElementById('tab-exercises').classList.toggle('active', tab === 'exercises');
   document.getElementById('tab-stats').classList.toggle('active', tab === 'stats');
   document.getElementById('save-bar').style.display = tab === 'training' ? 'flex' : 'none';
   if (tab === 'home') renderHome();
   if (tab === 'training') { renderPlanSwitcher(); renderDay(); }
+  if (tab === 'exercises') renderExercises();
   if (tab === 'stats') renderStats();
 }
+
+// ── ÜBUNGEN-TAB (Übung im Fokus) ──────────────────────────────
+let exercisesActiveMuscle = 'brust';
+
+function renderExercises() {
+  try {
+    renderExercisesInner();
+  } catch (err) {
+    console.error('renderExercises Fehler:', err);
+    const el = document.getElementById('exercises-content');
+    if (el) {
+      el.innerHTML = `
+        <div style="padding:16px;background:rgba(232,96,96,0.08);border:0.5px solid rgba(232,96,96,0.3);border-radius:10px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+        </div>
+      `;
+    }
+  }
+}
+
+function setExercisesMuscle(key) {
+  exercisesActiveMuscle = key;
+  renderExercises();
+}
+
+// Für jede Übungs-ID: in welchen Tagen (über alle Pläne) kommt sie aktuell vor
+function getDaysContainingExercise(exerciseId) {
+  const matches = [];
+  Object.values(PLAN_DEFS).forEach(plan => {
+    plan.days.forEach(day => {
+      if (day.exercises.some(ex => ex.id === exerciseId)) {
+        matches.push({ planName: plan.shortName, dayType: day.type });
+      }
+    });
+  });
+  return matches;
+}
+
+function renderExercisesInner() {
+  const term = (document.getElementById('exercises-search')?.value || '').toLowerCase().trim();
+
+  // Muskel-Tabs
+  const tabsEl = document.getElementById('exercises-muscle-tabs');
+  tabsEl.innerHTML = Object.entries(CATALOG).map(([key, cat]) => `
+    <button class="cat-tab ${exercisesActiveMuscle === key ? 'active' : ''}" onclick="setExercisesMuscle('${key}')">
+      <span class="cat-svg" style="color:${exercisesActiveMuscle === key ? 'var(--accent)' : 'var(--muted2)'}">${cat.svg}</span>
+      <span class="cat-label">${cat.label}</span>
+    </button>
+  `).join('');
+
+  // Übungsliste: entweder gefiltert über alle Kategorien (bei Suche) oder nur aktive Kategorie
+  let exercisesToShow = [];
+  if (term) {
+    Object.values(CATALOG).forEach(cat => {
+      cat.exercises.forEach(ex => { if (ex?.name?.toLowerCase().includes(term)) exercisesToShow.push(ex); });
+    });
+  } else {
+    exercisesToShow = CATALOG[exercisesActiveMuscle].exercises.filter(Boolean);
+  }
+
+  const html = exercisesToShow.map(ex => {
+    const best = getPersonalRecordById(ex.id, ex.name);
+    const lastSets = getLastEntryById(ex.id, ex.name);
+    const lastFilled = lastSets ? lastSets.filter(s => s.weight) : [];
+    const lastWeight = lastFilled.length ? Math.max(...lastFilled.map(s => parseFloat(s.weight))) : null;
+    const inDays = getDaysContainingExercise(ex.id);
+
+    return `
+      <div class="ex-list-row" onclick="showExerciseDetail('${ex.id}', '${ex.name.replace(/'/g,"\\'")}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;color:var(--text)">${ex.name}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:3px">
+            ${inDays.length ? inDays.map(d => d.dayType).join(' · ') : 'Nicht im aktuellen Plan'}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          ${best > 0 ? `<div style="font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:500">${best} kg</div><div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:2px">Bestleistung</div>` : `<div style="font-family:var(--mono);font-size:11px;color:var(--muted2)">—</div>`}
+        </div>
+        <svg class="ex-chevron" style="width:16px;height:16px;margin-left:8px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('exercises-content').innerHTML = html || `
+    <div style="font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;padding:30px 0">
+      ${term ? `Keine Übung gefunden für "${term}"` : 'Keine Übungen in dieser Kategorie'}
+    </div>
+  `;
+}
+
+function showExerciseDetail(exerciseId, exerciseName) {
+  const best = getPersonalRecordById(exerciseId, exerciseName);
+  const history = getLastEntriesById(exerciseId, exerciseName, 8).reverse();
+  const inDays = getDaysContainingExercise(exerciseId);
+  const lastSets = getLastEntryById(exerciseId, exerciseName);
+  const lastFilled = lastSets ? lastSets.filter(s => s.weight) : [];
+
+  const weights = history.map(sets => {
+    const filled = sets.filter(s => s.weight);
+    return filled.length ? Math.max(...filled.map(s => parseFloat(s.weight))) : 0;
+  }).filter(w => w > 0);
+  const maxW = Math.max(...weights, 1);
+
+  const html = `
+    <button class="modal-close" onclick="closeExerciseDetail()">×</button>
+    <h2>${exerciseName}</h2>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0">
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${best > 0 ? best : '—'}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Bestleistung (kg)</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
+        <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${lastFilled.length ? Math.max(...lastFilled.map(s=>parseFloat(s.weight))) : '—'}</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Letztes Gewicht (kg)</div>
+      </div>
+    </div>
+
+    ${weights.length >= 2 ? `
+    <div style="background:var(--bg3);border-radius:8px;padding:12px;margin-bottom:16px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Verlauf (letzte ${weights.length} Einheiten)</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:40px">
+        ${weights.map((w,i) => { const pct = Math.round((w/maxW)*100); const isLast = i === weights.length-1; return `<div style="flex:1;background:${isLast?'var(--accent)':'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px"></div>`; }).join('')}
+      </div>
+    </div>
+    ` : ''}
+
+    <div style="margin-bottom:8px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Kommt vor in</div>
+      ${inDays.length ? inDays.map(d => `
+        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid var(--border)">
+          <span style="font-size:12px;color:var(--text)">${d.dayType}</span>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--muted)">${d.planName}</span>
+        </div>
+      `).join('') : '<div style="font-family:var(--mono);font-size:11px;color:var(--muted)">Aktuell in keinem Plan enthalten</div>'}
+    </div>
+  `;
+
+  document.getElementById('exercise-detail-content').innerHTML = html;
+  document.getElementById('exercise-detail-modal').style.display = 'flex';
+}
+
+function closeExerciseDetail() {
+  document.getElementById('exercise-detail-modal').style.display = 'none';
+}
+// ─────────────────────────────────────────────────────────────
 
 // ── STATISTIKEN ───────────────────────────────────────────────
 let statsSearchTerm = '';
