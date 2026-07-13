@@ -1407,14 +1407,21 @@ function loadCustomPlan() {
   const saved = storageGet('gymbook:customplan');
   if (!saved) return;
   try {
-    const allCustomPlans = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    let allCustomPlans = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    // Migration: altes Format (vor Mehrfach-Plan-Unterstützung) war ein
+    // reines Array von Tagen statt {planId: [...]}. Das gehörte damals
+    // immer zu PPL, da es der einzige Plan war.
+    if (Array.isArray(allCustomPlans)) {
+      allCustomPlans = { ppl: allCustomPlans };
+    }
     const custom = allCustomPlans[activePlanId];
-    if (!custom) return;
+    if (!custom || !Array.isArray(custom)) return;
     // Restore plan – support added exercises
     custom.forEach((day, di) => {
-      if (!DAYS[di]) return;
+      if (!DAYS[di] || !day?.exercises) return;
       DAYS[di].exercises = day.exercises.map(ex => ({
         ...ex,
+        id: ex.id || slugify(ex.name), // Migration: alte Einträge ohne ID
         alternatives: ex.alternatives || []
       }));
     });
@@ -1427,7 +1434,17 @@ function loadCustomCatalog() {
   try {
     const custom = typeof saved === 'string' ? JSON.parse(saved) : saved;
     Object.entries(custom).forEach(([key, exercises]) => {
-      if (CATALOG[key]) CATALOG[key].exercises = exercises;
+      if (!CATALOG[key] || !Array.isArray(exercises)) return;
+      // Migration: altes Format speicherte reine Namens-Strings statt
+      // {id, name} Objekte. Ohne diese Umwandlung würde jeder spätere
+      // Zugriff auf .name auf einem String scheitern (undefined) und
+      // an manchen Stellen (z.B. Muskel-Farbcode) sogar einen Fehler
+      // werfen, der das gesamte Rendering der Übungsliste blockiert.
+      CATALOG[key].exercises = exercises.map(e => {
+        if (typeof e === 'string') return { id: slugify(e), name: e };
+        if (e && typeof e === 'object' && e.name) return { id: e.id || slugify(e.name), name: e.name };
+        return null;
+      }).filter(Boolean);
     });
   } catch(e) {}
 }
@@ -1687,7 +1704,7 @@ function renderDay() {
 
       // Check catalog first with partial match
       for (const [key, cat] of Object.entries(CATALOG)) {
-        if (cat.exercises.some(e => nameLower.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(nameLower))) {
+        if (cat.exercises.some(e => e?.name && (nameLower.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(nameLower)))) {
           const colors = {
             brust:   '#e87f7f',  // Rot
             trizeps: '#e8a060',  // Orange/Koralle
