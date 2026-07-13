@@ -630,7 +630,14 @@ const DAY_COLOR_MAP = {
   full_a: '#c9a84c', full_b: '#5dcaa5', full_c: '#e8935a'
 };
 
-let activePlanId = localStorage.getItem('gymbook:activeplan') || 'ppl';
+let activePlanId = (() => {
+  try {
+    const raw = localStorage.getItem('gymbook:activeplan');
+    if (!raw) return 'ppl';
+    const parsed = JSON.parse(raw);
+    return PLAN_DEFS[parsed] ? parsed : 'ppl';
+  } catch(e) { return 'ppl'; }
+})();
 let DAYS = PLAN_DEFS[activePlanId].days;
 
 let currentDay = 0;
