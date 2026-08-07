@@ -1199,6 +1199,8 @@ const CATALOG = {
 };
 
 let catalogTargetEi = null;
+let catalogAppendMode = false;
+let catalogAppendDi = null;
 let catalogActiveMuscle = 'brust';
 
 function getMuscleCategoryForExercise(exerciseName) {
@@ -1228,9 +1230,64 @@ function openCatalog(ei) {
 
 function closeCatalog() {
   document.getElementById('catalog-modal').style.display = 'none';
+  catalogAppendMode = false;
+}
+
+function openAddFromCatalog(di) {
+  catalogAppendMode = true;
+  catalogAppendDi = di;
+  catalogActiveMuscle = catalogActiveMuscle || 'brust';
+  renderCatalog();
+  document.getElementById('catalog-modal').style.display = 'flex';
+}
+
+function appendCatalogExercise(name, id) {
+  const di = catalogAppendDi;
+  const muscleLabel = CATALOG[catalogActiveMuscle].label;
+  const newEx = { id, name, muscle: muscleLabel, sets: 2, reps: '8–10', pause: '90 Sek', alternatives: [] };
+  DAYS[di].exercises.push(newEx);
+  if (editDraft) editDraft[di].exercises.push({ ...newEx });
+  closeCatalog();
+  renderDay();
 }
 
 function renderCatalog() {
+  if (catalogAppendMode) {
+    const di = catalogAppendDi;
+    const tabs = Object.entries(CATALOG).map(([key, cat]) => `
+      <button class="cat-tab ${catalogActiveMuscle === key ? 'active' : ''}" onclick="setCatalogMuscle('${key}')">
+        <span class="cat-svg" style="color:${catalogActiveMuscle === key ? 'var(--accent)' : 'var(--muted2)'}">${cat.svg}</span>
+        <span class="cat-label">${cat.label}</span>
+      </button>
+    `).join('');
+
+    const alreadyInDay = new Set(DAYS[di].exercises.map(e => e.id));
+    const exercises = CATALOG[catalogActiveMuscle].exercises.map(exObj => {
+      const name = exObj.name;
+      const safeName = name.replace(/'/g, "\\'");
+      const already = alreadyInDay.has(exObj.id);
+      return `
+        <div class="cat-ex-row ${already ? 'cat-ex-active' : ''}" onclick="${already ? '' : `appendCatalogExercise('${safeName}', '${exObj.id}')`}" style="${already ? 'opacity:0.4;cursor:default' : ''}">
+          <span class="cat-ex-name">${name}${already ? ' <span class="cat-active-badge">Bereits im Plan</span>' : ''}</span>
+          <span class="cat-ex-arrow">${already ? '✓' : '+'}</span>
+        </div>
+      `;
+    }).join('');
+
+    document.getElementById('catalog-inner').innerHTML = `
+      <div class="cat-header">
+        <div>
+          <div class="cat-title">+ Übung hinzufügen</div>
+          <div class="cat-subtitle">Wird als neue Zeile ergänzt</div>
+        </div>
+        <button class="modal-close" onclick="closeCatalog()">×</button>
+      </div>
+      <div class="cat-tabs">${tabs}</div>
+      <div class="cat-ex-list">${exercises}</div>
+    `;
+    return;
+  }
+
   const ei = catalogTargetEi;
   const di = catalogEditMode ? catalogTargetDi : currentDay;
   const ex = DAYS[di].exercises[ei];
@@ -1635,6 +1692,10 @@ function renderEditDay() {
       </div>
     `;
   });
+  // Bestehende Übung aus Katalog hinzufügen (ohne komplett neue anzulegen)
+  html += `
+    <button class="edit-save-btn" style="width:100%;margin-top:8px;background:var(--bg3);color:var(--accent);border:1px dashed rgba(201,168,76,0.4)" onclick="openAddFromCatalog(${di})">+ Übung aus Katalog hinzufügen</button>
+  `;
   // New exercise form
   html += `
     <div class="edit-new-ex">
