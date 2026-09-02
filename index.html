@@ -332,8 +332,9 @@
   .nav-btn.active-legs   { background: rgba(232,168,127,0.12); border-color: var(--legs);  color: var(--legs); }
 
   /* PLAN SWITCHER */
-  .plan-switcher { display: flex; gap: 8px; padding: 12px 20px 0; }
-  .plan-pill { background: var(--bg2); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 9px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; flex: 1; text-align: center; }
+  .plan-switcher { display: flex; gap: 8px; padding: 12px 20px 0; overflow-x: auto; scrollbar-width: none; }
+  .plan-switcher::-webkit-scrollbar { display: none; }
+  .plan-pill { background: var(--bg2); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 9px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; flex: 0 0 auto; text-align: center; white-space: nowrap; }
   .plan-pill:hover { border-color: var(--muted); color: var(--text); }
   .plan-pill.active { background: var(--accent-dim2); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
@@ -671,8 +672,8 @@ const FULLBODY_DAYS = [
 
 // Jeder Plan definiert seine Trainingstage + welcher Wochentag (JS: So=0..Sa=6) zu welchem Tag gehört
 const PLAN_DEFS = {
-  ppl: { id: 'ppl', name: 'Upper / Push / Pull', shortName: 'Upper/Push/Pull', days: PPL_DAYS, schedule: { upper: 1, push: 3, pull: 5 } },
-  fullbody: { id: 'fullbody', name: 'Ganzkörper A/B/C', shortName: 'Ganzkörper', days: FULLBODY_DAYS, schedule: { full_a: 1, full_b: 3, full_c: 5 } }
+  ppl: { id: 'ppl', name: 'Upper / Push / Pull', shortName: 'Upper/Push/Pull', days: PPL_DAYS, schedule: { upper: 1, push: 3, pull: 5 }, builtin: true },
+  fullbody: { id: 'fullbody', name: 'Ganzkörper A/B/C', shortName: 'Ganzkörper', days: FULLBODY_DAYS, schedule: { full_a: 1, full_b: 3, full_c: 5 }, builtin: true }
 };
 
 // Einheitliche Farben für alle Tag-IDs über alle Pläne hinweg (Kalender/Statistik bleiben konsistent)
@@ -680,6 +681,22 @@ const DAY_COLOR_MAP = {
   upper: '#9b7fe8', push: '#e87f7f', pull: '#7fb8e8', legs: '#e8a87f',
   full_a: '#c9a84c', full_b: '#5dcaa5', full_c: '#e8935a'
 };
+
+// Benutzerdefinierte Pläne synchron aus dem lokalen Speicher laden, BEVOR
+// activePlanId aufgelöst wird – sonst würde beim Öffnen kurz auf PPL
+// zurückgefallen und erst nach dem Cloud-Sync wieder auf den echten Plan
+// gewechselt (sichtbares Aufblitzen).
+(function bootstrapUserPlans() {
+  try {
+    const raw = localStorage.getItem('gymbook:userplans');
+    if (!raw) return;
+    const plans = JSON.parse(raw);
+    Object.entries(plans).forEach(([id, plan]) => {
+      PLAN_DEFS[id] = plan;
+      plan.days.forEach(day => { if (day.color && day.color.startsWith('#')) DAY_COLOR_MAP[day.id] = day.color; });
+    });
+  } catch(e) {}
+})();
 
 let activePlanId = (() => {
   try {
@@ -741,6 +758,7 @@ async function cloudPull() {
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
+    loadUserPlans();
     loadActivePlan();
     loadCustomPlan();
     loadCustomCatalog();
@@ -1482,6 +1500,18 @@ async function saveCustomPlan() {
   setTimeout(() => setStatus('☁ Synchronisiert', true), 2000);
 }
 
+function loadUserPlans() {
+  const saved = storageGet('gymbook:userplans');
+  if (!saved) return;
+  try {
+    const plans = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    Object.entries(plans).forEach(([id, plan]) => {
+      PLAN_DEFS[id] = plan;
+      plan.days.forEach(day => { if (day.color && day.color.startsWith('#')) DAY_COLOR_MAP[day.id] = day.color; });
+    });
+  } catch(e) {}
+}
+
 function loadActivePlan() {
   const saved = storageGet('gymbook:activeplan');
   if (saved && PLAN_DEFS[saved]) {
@@ -1514,9 +1544,98 @@ function renderPlanSwitcher() {
   const wrap = document.getElementById('plan-switcher');
   if (!wrap) return;
   wrap.innerHTML = Object.values(PLAN_DEFS).map(plan => `
-    <button class="plan-pill ${plan.id === activePlanId ? 'active' : ''}" onclick="switchPlan('${plan.id}')">${plan.shortName}</button>
-  `).join('');
+    <button class="plan-pill ${plan.id === activePlanId ? 'active' : ''}" onclick="switchPlan('${plan.id}')">
+      ${plan.shortName}${!plan.builtin ? `<span onclick="event.stopPropagation();deleteUserPlan('${plan.id}')" style="margin-left:6px;opacity:0.55;font-weight:400">✕</span>` : ''}
+    </button>
+  `).join('') + `<button class="plan-pill" style="flex:0 0 auto;border-style:dashed;color:var(--accent)" onclick="openCreatePlanModal()">+ Neuer Plan</button>`;
 }
+
+// ── EIGENE PLÄNE ANLEGEN / LÖSCHEN ────────────────────────────
+function openCreatePlanModal() {
+  const html = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Neuer Trainingsplan</h2>
+    <div style="margin:16px 0 14px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Plan-Name</div>
+      <input type="text" id="new-plan-name" placeholder="z.B. Push/Legs/Pull 2.0"
+        style="width:100%;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:14px;padding:11px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Trainingstage (Mo / Mi / Fr)</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+      <input type="text" id="new-plan-day-a" placeholder="Montag – z.B. UPPER A" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+      <input type="text" id="new-plan-day-b" placeholder="Mittwoch – z.B. LEGS" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+      <input type="text" id="new-plan-day-c" placeholder="Freitag – z.B. UPPER B" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:13px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+    </div>
+    <button onclick="createNewPlan()" style="width:100%;background:var(--accent);color:#090909;border:none;font-family:var(--mono);font-size:13px;font-weight:600;padding:14px;border-radius:10px;cursor:pointer">Plan erstellen & Übungen hinzufügen</button>
+  `;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('new-plan-name')?.focus(), 100);
+}
+
+function createNewPlan() {
+  const name = document.getElementById('new-plan-name').value.trim();
+  if (!name) { alert('Bitte einen Plan-Namen eingeben.'); return; }
+  const dayAName = document.getElementById('new-plan-day-a').value.trim() || 'TAG A';
+  const dayBName = document.getElementById('new-plan-day-b').value.trim() || 'TAG B';
+  const dayCName = document.getElementById('new-plan-day-c').value.trim() || 'TAG C';
+
+  const existingIds = new Set(Object.keys(PLAN_DEFS));
+  const planId = makeUniqueId(slugify(name), existingIds);
+
+  // Farbpalette die sich von den bereits verwendeten Tag-Farben abhebt
+  const palette = ['#7fd9c9', '#d97fc9', '#c9d97f', '#7f9bd9', '#d9a87f', '#a87fd9'];
+  const usedColors = new Set(Object.values(DAY_COLOR_MAP));
+  const pickColor = (idx) => palette.find(c => !usedColors.has(c)) || palette[idx % palette.length];
+
+  const dayA = { id: `${planId}_a`, label: 'Montag', type: dayAName.toUpperCase(), color: pickColor(0), duration: '– Min', exercises: [] };
+  usedColors.add(dayA.color);
+  const dayB = { id: `${planId}_b`, label: 'Mittwoch', type: dayBName.toUpperCase(), color: pickColor(1), duration: '– Min', exercises: [] };
+  usedColors.add(dayB.color);
+  const dayC = { id: `${planId}_c`, label: 'Freitag', type: dayCName.toUpperCase(), color: pickColor(2), duration: '– Min', exercises: [] };
+
+  const newPlan = {
+    id: planId,
+    name: name,
+    shortName: name.length > 16 ? name.slice(0, 16) + '…' : name,
+    days: [dayA, dayB, dayC],
+    schedule: { [dayA.id]: 1, [dayB.id]: 3, [dayC.id]: 5 },
+    builtin: false
+  };
+
+  PLAN_DEFS[planId] = newPlan;
+  DAY_COLOR_MAP[dayA.id] = dayA.color;
+  DAY_COLOR_MAP[dayB.id] = dayB.color;
+  DAY_COLOR_MAP[dayC.id] = dayC.color;
+
+  const saved = storageGet('gymbook:userplans');
+  const allUserPlans = saved ? (typeof saved === 'string' ? JSON.parse(saved) : saved) : {};
+  allUserPlans[planId] = newPlan;
+  storageSet('gymbook:userplans', allUserPlans);
+
+  closeModal();
+  switchPlan(planId);
+  toggleEditMode(); // direkt in den Plan-Editor, damit sofort Übungen ergänzt werden können
+}
+
+function deleteUserPlan(planId) {
+  const plan = PLAN_DEFS[planId];
+  if (!plan || plan.builtin) return;
+  if (!confirm(`Plan "${plan.name}" wirklich löschen?\n\nDeine bisherige Trainingshistorie mit diesem Plan bleibt erhalten — nur der Plan selbst wird entfernt.`)) return;
+
+  delete PLAN_DEFS[planId];
+  const saved = storageGet('gymbook:userplans');
+  const allUserPlans = saved ? (typeof saved === 'string' ? JSON.parse(saved) : saved) : {};
+  delete allUserPlans[planId];
+  storageSet('gymbook:userplans', allUserPlans);
+
+  if (activePlanId === planId) {
+    switchPlan('ppl');
+  } else {
+    renderPlanSwitcher();
+  }
+}
+// ─────────────────────────────────────────────────────────────
 
 function loadCustomPlan() {
   const saved = storageGet('gymbook:customplan');
@@ -1735,11 +1854,19 @@ function renderEditDay() {
 
 function renderNav() {
   const nav = document.getElementById('day-nav');
-  nav.innerHTML = DAYS.map((d,i) => `
-    <button class="nav-btn ${i===currentDay ? 'active-'+d.color : ''}" onclick="switchDay(${i})">
-      <span class="dot dot-${d.color}"></span>${d.type}
-    </button>
-  `).join('');
+  nav.innerHTML = DAYS.map((d,i) => {
+    const isHex = typeof d.color === 'string' && d.color.startsWith('#');
+    const active = i === currentDay;
+    const btnClass = !isHex && active ? `nav-btn active-${d.color}` : 'nav-btn';
+    const btnStyle = isHex && active ? `border-color:${d.color};color:${d.color};background:${d.color}22` : '';
+    const dotClass = isHex ? 'dot' : `dot dot-${d.color}`;
+    const dotStyle = isHex ? `background:${d.color}` : '';
+    return `
+      <button class="${btnClass}" style="${btnStyle}" onclick="switchDay(${i})">
+        <span class="${dotClass}" style="${dotStyle}"></span>${d.type}
+      </button>
+    `;
+  }).join('');
 }
 
 function renderDay() {
