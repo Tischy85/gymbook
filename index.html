@@ -323,11 +323,25 @@
   .nav-btn.active-legs   { background: rgba(232,168,127,0.12); border-color: var(--legs);  color: var(--legs); }
 
   /* PLAN SWITCHER */
-  .plan-switcher { display: flex; gap: 8px; padding: 12px 20px 0; overflow-x: auto; scrollbar-width: none; }
-  .plan-switcher::-webkit-scrollbar { display: none; }
-  .plan-pill { background: var(--bg2); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 11px; font-weight: 500; padding: 9px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; flex: 0 0 auto; text-align: center; white-space: nowrap; }
-  .plan-pill:hover { border-color: var(--muted); color: var(--text); }
-  .plan-pill.active { background: var(--accent-dim2); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  /* Plan-Auswahl: ein Knopf statt einer Leiste, die mit jedem Plan enger wird */
+  .plan-switcher { padding: 12px 20px 0; }
+  .plan-select { display: flex; align-items: center; gap: 8px; width: 100%; background: var(--bg2); border: 0.5px solid var(--border2); border-radius: 10px; padding: 11px 14px; cursor: pointer; transition: border-color 0.15s; color: var(--text); }
+  .plan-select:hover { border-color: var(--accent); }
+  .plan-select-label { font-family: var(--mono); font-size: 10px; color: var(--muted2); text-transform: uppercase; letter-spacing: 0.08em; flex-shrink: 0; }
+  .plan-select-name { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plan-select-count { font-family: var(--mono); font-size: 10px; color: var(--muted2); background: var(--bg3); border-radius: 10px; padding: 2px 7px; flex-shrink: 0; }
+
+  /* Planverwaltung */
+  .plan-row { display: flex; align-items: center; gap: 8px; padding: 12px 12px; background: var(--bg3); border: 0.5px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+  .plan-row.active { border-color: var(--accent); background: var(--accent-dim); }
+  .plan-row-name { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .plan-row-meta { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-top: 3px; }
+  .plan-row-badge { font-family: var(--mono); font-size: 9px; color: var(--accent); background: var(--accent-dim2); border-radius: 3px; padding: 2px 6px; vertical-align: middle; }
+  .plan-row-btn { background: var(--bg4); border: 0.5px solid var(--border2); color: var(--muted); font-family: var(--mono); font-size: 12px; min-width: 40px; height: 40px; padding: 0 10px; border-radius: 8px; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
+  .plan-row-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .plan-row-btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .plan-add-btn { width: 100%; background: none; border: 1px dashed rgba(201,168,76,0.4); color: var(--accent); font-family: var(--mono); font-size: 12px; padding: 13px; border-radius: 10px; cursor: pointer; margin-top: 6px; }
+  .plan-add-btn:hover { background: var(--accent-dim); }
 
   /* Session meta */
   .session-meta { display: flex; align-items: center; gap: 10px; padding: 14px 20px 0; flex-wrap: nowrap; }
@@ -1574,14 +1588,115 @@ function switchPlan(planId) {
   if (currentTab === 'home') renderHome();
 }
 
+// Sichtbare Pläne = alle außer den ausgeblendeten. Eingebaute Pläne lassen
+// sich nicht löschen (sie stehen im Code), aber ausblenden – und jederzeit
+// wieder einblenden.
+function getHiddenPlanIds() {
+  const saved = storageGet('gymbook:hiddenplans');
+  if (!saved) return [];
+  try { return typeof saved === 'string' ? JSON.parse(saved) : saved; } catch(e) { return []; }
+}
+
+function getVisiblePlans() {
+  const hidden = getHiddenPlanIds();
+  const visible = Object.values(PLAN_DEFS).filter(p => !hidden.includes(p.id));
+  // Sicherheitsnetz: nie ohne Plan dastehen
+  return visible.length ? visible : Object.values(PLAN_DEFS);
+}
+
 function renderPlanSwitcher() {
   const wrap = document.getElementById('plan-switcher');
   if (!wrap) return;
-  wrap.innerHTML = Object.values(PLAN_DEFS).map(plan => `
-    <button class="plan-pill ${plan.id === activePlanId ? 'active' : ''}" onclick="switchPlan('${plan.id}')">
-      ${plan.shortName}${!plan.builtin ? `<span onclick="event.stopPropagation();deleteUserPlan('${plan.id}')" style="margin-left:6px;opacity:0.55;font-weight:400">✕</span>` : ''}
-    </button>
-  `).join('') + `<button class="plan-pill" style="flex:0 0 auto;border-style:dashed;color:var(--accent)" onclick="openCreatePlanModal()">+ Neuer Plan</button>`;
+  const plan = PLAN_DEFS[activePlanId];
+  const count = getVisiblePlans().length;
+  wrap.innerHTML = `
+    <button class="plan-select" onclick="openPlanManager()">
+      <span class="plan-select-label">Plan</span>
+      <span class="plan-select-name">${plan ? plan.shortName : '—'}</span>
+      <span class="plan-select-count">${count}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>`;
+}
+
+// ── PLANVERWALTUNG ────────────────────────────────────────────
+function openPlanManager() {
+  const hidden = getHiddenPlanIds();
+  const visible = getVisiblePlans();
+  const hiddenPlans = Object.values(PLAN_DEFS).filter(p => hidden.includes(p.id));
+
+  const row = (plan) => {
+    const active = plan.id === activePlanId;
+    const days = plan.days.length;
+    const canRemove = visible.length > 1;
+    return `
+      <div class="plan-row ${active ? 'active' : ''}">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="switchPlan('${plan.id}');closeModal()">
+          <div class="plan-row-name">${plan.name}${active ? ' <span class="plan-row-badge">aktiv</span>' : ''}</div>
+          <div class="plan-row-meta">${days} Trainingstage${plan.builtin ? ' · Vorlage' : ''}</div>
+        </div>
+        ${!plan.builtin ? `<button class="plan-row-btn" onclick="renamePlan('${plan.id}')" aria-label="Umbenennen">✎</button>` : ''}
+        ${canRemove ? `<button class="plan-row-btn danger" onclick="${plan.builtin ? `hidePlan('${plan.id}')` : `deleteUserPlan('${plan.id}')`}" aria-label="Entfernen">${plan.builtin ? '⊘' : '🗑'}</button>` : ''}
+      </div>`;
+  };
+
+  document.getElementById('modal-content').innerHTML = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Trainingspläne</h2>
+    <div style="margin-top:14px">${visible.map(row).join('')}</div>
+
+    <button class="plan-add-btn" onclick="openCreatePlanModal()">+ Neuen Plan erstellen</button>
+
+    ${hiddenPlans.length ? `
+      <div style="margin-top:18px">
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Ausgeblendet</div>
+        ${hiddenPlans.map(p => `
+          <div class="plan-row" style="opacity:0.6">
+            <div style="flex:1;min-width:0">
+              <div class="plan-row-name">${p.name}</div>
+              <div class="plan-row-meta">${p.days.length} Trainingstage · Vorlage</div>
+            </div>
+            <button class="plan-row-btn" onclick="unhidePlan('${p.id}')">Einblenden</button>
+          </div>`).join('')}
+      </div>` : ''}
+
+    ${visible.length === 1 ? `<div style="font-family:var(--mono);font-size:10px;color:var(--muted2);margin-top:14px;line-height:1.6">Der letzte verbleibende Plan lässt sich nicht entfernen.</div>` : ''}
+  `;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function hidePlan(planId) {
+  if (getVisiblePlans().length <= 1) return;
+  const hidden = getHiddenPlanIds();
+  if (!hidden.includes(planId)) hidden.push(planId);
+  storageSet('gymbook:hiddenplans', hidden);
+  if (activePlanId === planId) {
+    const next = getVisiblePlans()[0];
+    if (next) switchPlan(next.id);
+  }
+  renderPlanSwitcher();
+  openPlanManager();
+}
+
+function unhidePlan(planId) {
+  const hidden = getHiddenPlanIds().filter(id => id !== planId);
+  storageSet('gymbook:hiddenplans', hidden);
+  renderPlanSwitcher();
+  openPlanManager();
+}
+
+function renamePlan(planId) {
+  const plan = PLAN_DEFS[planId];
+  if (!plan || plan.builtin) return;
+  const name = prompt('Neuer Name für den Plan:', plan.name);
+  if (!name || !name.trim()) return;
+  plan.name = name.trim();
+  plan.shortName = plan.name.length > 16 ? plan.name.slice(0,16) + '…' : plan.name;
+  const saved = storageGet('gymbook:userplans');
+  const all = saved ? (typeof saved === 'string' ? JSON.parse(saved) : saved) : {};
+  if (all[planId]) { all[planId].name = plan.name; all[planId].shortName = plan.shortName; }
+  storageSet('gymbook:userplans', all);
+  renderPlanSwitcher();
+  openPlanManager();
 }
 
 // ── EIGENE PLÄNE ANLEGEN / LÖSCHEN ────────────────────────────
@@ -1648,6 +1763,8 @@ function createNewPlan() {
   storageSet('gymbook:userplans', allUserPlans);
 
   closeModal();
+  // Ein neu angelegter Plan darf nicht als ausgeblendet gelten
+  storageSet('gymbook:hiddenplans', getHiddenPlanIds().filter(id => id !== planId));
   switchPlan(planId);
   toggleEditMode(); // direkt in den Plan-Editor, damit sofort Übungen ergänzt werden können
 }
@@ -1664,10 +1781,11 @@ function deleteUserPlan(planId) {
   storageSet('gymbook:userplans', allUserPlans);
 
   if (activePlanId === planId) {
-    switchPlan('ppl');
-  } else {
-    renderPlanSwitcher();
+    const next = getVisiblePlans()[0];
+    if (next) switchPlan(next.id);
   }
+  renderPlanSwitcher();
+  if (document.getElementById('modal').style.display === 'flex') openPlanManager();
 }
 // ─────────────────────────────────────────────────────────────
 
