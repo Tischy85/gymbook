@@ -676,8 +676,8 @@ const FULLBODY_DAYS = [
 
 // Jeder Plan definiert seine Trainingstage + welcher Wochentag (JS: So=0..Sa=6) zu welchem Tag gehört
 const PLAN_DEFS = {
-  ppl: { id: 'ppl', name: 'Upper / Push / Pull', shortName: 'Upper/Push/Pull', days: PPL_DAYS, schedule: { upper: 1, push: 3, pull: 5 }, builtin: true },
-  fullbody: { id: 'fullbody', name: 'Ganzkörper A/B/C', shortName: 'Ganzkörper', days: FULLBODY_DAYS, schedule: { full_a: 1, full_b: 3, full_c: 5 }, builtin: true }
+  ppl: { id: 'ppl', name: 'Upper / Push / Pull', shortName: 'Upper/Push/Pull', days: PPL_DAYS, weeklyTarget: 3, builtin: true },
+  fullbody: { id: 'fullbody', name: 'Ganzkörper A/B/C', shortName: 'Ganzkörper', days: FULLBODY_DAYS, weeklyTarget: 3, builtin: true }
 };
 
 // Einheitliche Farben für alle Tag-IDs über alle Pläne hinweg (Kalender/Statistik bleiben konsistent)
@@ -848,6 +848,17 @@ function isSessionKey(k) {
 }
 
 // Alle Trainingseinheiten; mit onlyCompleted nur abgeschlossene.
+// Session-Keys haben die Form gymbook:<tag>:<datum>. Ein reines .sort()
+// sortiert deshalb nach TAGESNAME und erst danach nach Datum – "die letzte
+// Einheit" war so nicht die neueste, sondern die des alphabetisch letzten
+// Tages. Immer hierüber sortieren.
+function sortByDate(keys, desc) {
+  return keys.slice().sort((a, b) => {
+    const da = a.split(':')[2] || '', db = b.split(':')[2] || '';
+    return desc ? db.localeCompare(da) : da.localeCompare(db);
+  });
+}
+
 function getSessionKeys(onlyCompleted) {
   const keys = storageGetAllKeys().filter(isSessionKey);
   return onlyCompleted ? keys.filter(k => storageGet(k)?.completed === true) : keys;
@@ -945,9 +956,8 @@ function getHistory(dayId) {
 function getLastEntry(dayId, exIndex) {
   // Legacy fallback by index
   const date = activeDateStr();
-  const keys = storageGetAllKeys()
-    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date))
-    .sort().reverse();
+  const keys = sortByDate(storageGetAllKeys()
+    .filter(k => k.startsWith(`gymbook:${dayId}:`) && !k.endsWith(date)), true);
   if (!keys.length) return null;
   const raw = storageGet(keys[0]);
   if (!raw) return null;
@@ -995,7 +1005,7 @@ function bestSetValue(sets) {
 
 function getLastEntryById(exerciseId, exerciseName) {
   const date = activeDateStr();
-  const allKeys = getSessionKeys().filter(k => !k.endsWith(date)).sort().reverse();
+  const allKeys = sortByDate(getSessionKeys().filter(k => !k.endsWith(date)), true);
 
   for (const k of allKeys) {
     const raw = storageGet(k);
@@ -1548,6 +1558,32 @@ async function saveCustomPlan() {
   setTimeout(() => setStatus('☁ Synchronisiert', true), 2000);
 }
 
+// Wie viele Einheiten der Plan pro Woche vorsieht. Früher aus den festen
+// Wochentagen abgeleitet – jetzt eine reine Zielzahl, weil die Reihenfolge
+// rotiert statt an Kalendertagen zu hängen.
+function getWeeklyTarget(plan) {
+  const p = plan || PLAN_DEFS[activePlanId];
+  if (!p) return 3;
+  if (p.weeklyTarget) return p.weeklyTarget;
+  if (p.schedule) return Object.keys(p.schedule).length;   // Altbestand
+  return p.days.length;
+}
+
+// Nächster Tag im Zyklus: der auf die zuletzt abgeschlossene Einheit folgende.
+// Bewusst kalenderunabhängig – verschiebt sich ein Training, verschiebt sich
+// die Reihenfolge mit, statt dass ein Tag übersprungen wird.
+function getNextPlannedDay() {
+  if (!DAYS.length) return null;
+  const dayIds = DAYS.map(d => d.id);
+  const lastKey = sortByDate(getSessionKeys(true)
+    .filter(k => dayIds.includes(k.split(':')[1])), true)[0];
+  if (!lastKey) return { day: DAYS[0], lastDayType: null, lastDate: null };
+  const lastDayId = lastKey.split(':')[1];
+  const idx = dayIds.indexOf(lastDayId);
+  const next = DAYS[(idx + 1) % DAYS.length];
+  return { day: next, lastDayType: DAYS[idx]?.type || null, lastDate: lastKey.split(':')[2] };
+}
+
 function loadUserPlans() {
   const saved = storageGet('gymbook:userplans');
   if (!saved) return;
@@ -1709,11 +1745,11 @@ function openCreatePlanModal() {
       <input type="text" id="new-plan-name" placeholder="z.B. Push/Legs/Pull 2.0"
         style="width:100%;background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:11px 12px;border-radius:8px;outline:none;box-sizing:border-box">
     </div>
-    <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Trainingstage (Mo / Mi / Fr)</div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px">Trainingstage (Reihenfolge im Zyklus)</div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
-      <input type="text" id="new-plan-day-a" placeholder="Montag – z.B. UPPER A" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
-      <input type="text" id="new-plan-day-b" placeholder="Mittwoch – z.B. LEGS" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
-      <input type="text" id="new-plan-day-c" placeholder="Freitag – z.B. UPPER B" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+      <input type="text" id="new-plan-day-a" placeholder="1. Tag – z.B. UPPER A" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+      <input type="text" id="new-plan-day-b" placeholder="2. Tag – z.B. LEGS" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
+      <input type="text" id="new-plan-day-c" placeholder="3. Tag – z.B. UPPER B" style="background:#111114;border:1px solid rgba(255,255,255,0.22);color:#f5f2eb;font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:8px;outline:none;box-sizing:border-box">
     </div>
     <button onclick="createNewPlan()" style="width:100%;background:var(--accent);color:#090909;border:none;font-family:var(--mono);font-size:13px;font-weight:600;padding:14px;border-radius:10px;cursor:pointer">Plan erstellen & Übungen hinzufügen</button>
   `;
@@ -1748,7 +1784,7 @@ function createNewPlan() {
     name: name,
     shortName: name.length > 16 ? name.slice(0, 16) + '…' : name,
     days: [dayA, dayB, dayC],
-    schedule: { [dayA.id]: 1, [dayB.id]: 3, [dayC.id]: 5 },
+    weeklyTarget: 3,
     builtin: false
   };
 
@@ -2044,7 +2080,10 @@ function renderDayInner() {
   loadSessionData();
   const date = activeDateStr();
   const isBackEntry = date !== todayStr();
-  document.getElementById('today-date').textContent = `${day.label} · ${formatDate(date)}`;
+  // Kopfzeile zeigt den gewählten Trainingstag + das echte Datum. Der früher
+  // fest hinterlegte Wochentag (day.label) wäre bei Rotation irreführend –
+  // "Montag" stünde dann auch an einem Dienstag.
+  document.getElementById('today-date').textContent = `${day.type} · ${formatDate(date)}`;
 
   // Week stats
   const weekStart = new Date();
@@ -2052,7 +2091,7 @@ function renderDayInner() {
   weekStart.setHours(0,0,0,0);
   const weekKeys = getSessionKeys(true).filter(k => new Date(k.split(':')[2]) >= weekStart);
   const weekDone = weekKeys.length;
-  const weekTotal = Object.keys(PLAN_DEFS[activePlanId].schedule).length;
+  const weekTotal = getWeeklyTarget();
 
   // Load session note
   const noteKey = `gymbook:note:${day.id}:${date}`;
@@ -2299,7 +2338,7 @@ function parseRepRange(repsStr) {
 
 function getLastEntriesById(exerciseId, exerciseName, count) {
   const date = activeDateStr();
-  const allKeys = getSessionKeys().filter(k => !k.endsWith(date)).sort().reverse();
+  const allKeys = sortByDate(getSessionKeys().filter(k => !k.endsWith(date)), true);
 
   const results = [];
   for (const k of allKeys) {
@@ -3309,7 +3348,7 @@ function renderStatsInner() {
   // Progress stats – gruppiert nach Übungs-ID (plan-übergreifend), Anzeige über Namen
   const weightHistory = {}; // id -> { name, entries: [{weight}] }
   const volumeHistory = {};
-  completedKeys.sort().forEach(k => {
+  sortByDate(completedKeys).forEach(k => {
     const raw = storageGet(k);
     if (!raw) return;
     const sets = raw.sets || raw;
@@ -3395,7 +3434,7 @@ function renderStatsInner() {
   const dayIdsWithSessions = [...new Set(completedKeys.map(k => k.split(':')[1]))];
   dayIdsWithSessions.forEach(dayId => {
     const dayDef = allDaysAcrossPlans.find(d => d.id === dayId);
-    const dayKeys = completedKeys.filter(k => k.split(':')[1] === dayId).sort().reverse().slice(0,10);
+    const dayKeys = sortByDate(completedKeys.filter(k => k.split(':')[1] === dayId), true).slice(0,10);
     if (!dayKeys.length) return;
 
     const filtered = dayKeys.filter(k => {
@@ -3641,24 +3680,16 @@ function renderHomeInner() {
 
   document.getElementById('home-date').textContent = `${weekdays[now.getDay()]}, ${formatDate(todayStr())}`;
 
-  // Next training day
-  const weekdayMap = PLAN_DEFS[activePlanId].schedule;
-  const todayWd = now.getDay();
-  let nextDay = null, nextDiff = 8;
-  DAYS.forEach(d => {
-    const target = weekdayMap[d.id];
-    if (target == null) return; // optionale Tage ohne festen Termin (z.B. Beine)
-    let diff = (target - todayWd + 7) % 7;
-    if (diff === 0) diff = 7;
-    if (diff < nextDiff) { nextDiff = diff; nextDay = d; }
-  });
-
-  // Today's session if exists
-  const todaySession = DAYS.find(d => {
-    const wd = weekdayMap[d.id];
-    return wd === todayWd;
-  });
-  const todayCompleted = todaySession ? isSessionCompleted(todaySession.id, todayStr()) : false;
+  // Nächste Einheit aus dem Zyklus, nicht aus dem Wochentag
+  const rotation = getNextPlannedDay();
+  const nextDay = rotation ? rotation.day : null;
+  // Heute schon trainiert? (unabhängig davon, welcher Wochentag ist)
+  const todayDone = getSessionKeys(true).find(k => k.endsWith(`:${todayStr()}`));
+  const todayCompleted = !!todayDone;
+  const todayDayId = todayDone ? todayDone.split(':')[1] : null;
+  const todaySession = todayDayId
+    ? Object.values(PLAN_DEFS).flatMap(p => p.days).find(d => d.id === todayDayId)
+    : null;
 
   // Week stats – only completed sessions
   const weekStart = new Date(now);
@@ -3681,7 +3712,7 @@ function renderHomeInner() {
   }
 
   // Last session
-  const lastKey = allKeys.sort().reverse()[0];
+  const lastKey = sortByDate(allKeys, true)[0];
   let lastSessionHtml = '';
   if (lastKey) {
     const lastDayId = lastKey.split(':')[1];
@@ -3756,21 +3787,17 @@ function renderHomeInner() {
   });
   const topPRs = Object.entries(bestLifts).sort((a,b) => b[1]-a[1]).slice(0, 3);
 
-  const weekdayShort = ['So','Mo','Di','Mi','Do','Fr','Sa'];
-  const weekPills = DAYS.filter(d => weekdayMap[d.id] != null).map(d => {
-    const wd = weekdayMap[d.id];
-    const dateObj = new Date(weekStart);
-    dateObj.setDate(weekStart.getDate() + wd - 1);
-    const dateStr = dateObj.toISOString().slice(0,10);
-    const done = isSessionCompleted(d.id, dateStr);
+  // Wochenfortschritt zählt nur noch Einheiten, keine bestimmten Wochentage
+  const weeklyTarget = getWeeklyTarget();
+  const weekdayShortNames = ['So','Mo','Di','Mi','Do','Fr','Sa'];
+  const weekDoneDays = weekKeys.map(k => weekdayShortNames[new Date(k.split(':')[2]).getDay()]);
+  const weekPills = Array.from({length: Math.max(weeklyTarget, weekDone)}, (_, i) => {
+    const done = i < weekDone;
     return `<div class="home-week-pill ${done ? 'done' : 'pending'}">
-      <div class="home-week-pill-label">${weekdayShort[wd]}</div>
-      <div style="font-size:14px;margin-top:2px">${done ? '✓' : '○'}</div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-top:1px">${d.type.split('-')[0].split(' ')[0]}</div>
+      <div style="font-size:15px">${done ? '✓' : '○'}</div>
+      <div class="home-week-pill-label" style="margin-top:3px">${done ? (weekDoneDays[i] || '') : '—'}</div>
     </div>`;
   }).join('');
-
-  const nextDayName = nextDiff === 1 ? 'Morgen' : nextDiff === 7 ? 'Nächsten ' + ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()] : ['So','Mo','Di','Mi','Do','Fr','Sa'][new Date(now.getTime() + nextDiff * 86400000).getDay()];
 
   // Body weight history
   const bwKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:bodyweight:')).sort().reverse();
@@ -3786,25 +3813,18 @@ function renderHomeInner() {
       <div class="home-greeting-sub">${todayCompleted ? 'Starkes Training heute! 💪' : 'Bereit fürs Training?'}</div>
     </div>
 
-    ${todaySession && todayCompleted ? `
+    ${todayCompleted ? `
     <div class="home-card" style="border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.04)">
       <div class="home-card-title">✓ Heute abgeschlossen</div>
-      <div class="home-next-type">${todaySession.type}</div>
-      <div class="home-next-day" style="margin-top:4px">${nextDay ? `Nächste Einheit: ${nextDayName} · ${nextDay.type}` : 'Genieß die Erholung!'}</div>
-    </div>
-    ` : todaySession ? `
-    <div class="home-card" style="border-color:rgba(201,168,76,0.3);background:rgba(201,168,76,0.05)">
-      <div class="home-card-title">Heute auf dem Plan</div>
-      <div class="home-next-type">${todaySession.type}</div>
-      <div class="home-next-day">${todaySession.duration}</div>
-      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(todaySession)};switchTab('training')">Training starten →</button>
+      <div class="home-next-type">${todaySession ? todaySession.type : 'Training'}</div>
+      <div class="home-next-day" style="margin-top:4px">${nextDay ? `Als Nächstes: ${nextDay.type}` : 'Genieß die Erholung!'}</div>
     </div>
     ` : nextDay ? `
-    <div class="home-card">
-      <div class="home-card-title">Nächste Einheit · ${nextDayName}</div>
+    <div class="home-card" style="border-color:rgba(201,168,76,0.3);background:rgba(201,168,76,0.05)">
+      <div class="home-card-title">Als Nächstes dran</div>
       <div class="home-next-type">${nextDay.type}</div>
-      <div class="home-next-day">${nextDay.duration}</div>
-      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(nextDay)};switchTab('training')">Zum Plan →</button>
+      <div class="home-next-day">${nextDay.duration}${rotation && rotation.lastDayType ? ` · zuletzt ${rotation.lastDayType} am ${formatDate(rotation.lastDate)}` : ''}</div>
+      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(nextDay)};switchTab('training')">Training starten →</button>
     </div>
     ` : ''}
 
@@ -3846,7 +3866,7 @@ function renderHomeInner() {
     </div>
 
     <div class="home-card">
-      <div class="home-card-title">Diese Woche</div>
+      <div class="home-card-title">Diese Woche · ${weekDone} von ${weeklyTarget}</div>
       <div class="home-week-pills">${weekPills}</div>
     </div>
 
