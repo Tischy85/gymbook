@@ -67,7 +67,6 @@
   .exercise-header { display: flex; align-items: center; gap: 14px; padding: 16px 18px; cursor: pointer; }
   .ex-num { font-family: var(--mono); font-size: 10px; color: var(--muted2); width: 18px; flex-shrink: 0; }
   .ex-name { font-size: 13px; font-weight: 600; flex: 1; letter-spacing: -0.2px; }
-  .ex-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
   .ex-chevron { width: 18px; height: 18px; color: var(--muted2); transition: transform 0.25s ease; flex-shrink: 0; }
   .ex-chevron.open { transform: rotate(90deg); }
   .exercise-body { display: none; padding: 0 18px 16px; border-top: 0.5px solid var(--border); }
@@ -97,10 +96,6 @@
   .history-sets { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: 1; }
 
   /* SUGGESTION BADGES */
-  .sugg-badge { font-family: var(--mono); font-size: 10px; font-weight: 500; padding: 3px 8px; border-radius: 3px; white-space: nowrap; }
-  .sugg-up   { background: var(--accent-dim2); color: var(--accent3); border: 0.5px solid rgba(201,168,76,0.3); }
-  .sugg-half { background: rgba(201,168,76,0.07); color: var(--accent); border: 0.5px solid rgba(201,168,76,0.2); }
-  .sugg-same { background: rgba(255,255,255,0.03); color: var(--muted); border: 0.5px solid var(--border); }
   .history-exceeded { color: var(--accent) !important; }
   .sugg-detail { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-top: 6px; font-style: italic; }
 
@@ -138,7 +133,6 @@
     .set-row     { grid-template-columns: 22px 1fr 42px 1fr 42px 36px; gap: 6px; margin-bottom: 10px; }
     .set-input { font-size: 16px; padding: 11px 6px; border-radius: 6px; }
     .check-btn { width: 36px; height: 44px; border-radius: 6px; font-size: 16px; }
-    .sugg-badge { font-size: 9px; padding: 2px 7px; }
     .swap-btn { padding: 5px 10px; font-size: 10px; min-height: 32px; }
     .set-adj-btn { padding: 8px 14px; min-height: 36px; font-size: 10px; }
     .modal-overlay { align-items: flex-end; padding: 0; }
@@ -176,9 +170,22 @@
   @keyframes prPop { 0%{opacity:0;transform:translateX(-50%) scale(0.8)} 100%{opacity:1;transform:translateX(-50%) scale(1)} }
   .delete-session-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px; opacity: 0.4; transition: opacity 0.15s; }
   .delete-session-btn:hover { opacity: 1; }
-  .progress-dots { display: flex; gap: 3px; margin-top: 4px; }
-  .progress-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bg4); transition: background 0.2s; }
-  .progress-dot.done { background: var(--accent); }
+  .progress-dots { display: flex; gap: 4px; margin-top: 2px; }
+  .progress-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--bg4); transition: background 0.2s; }
+  .progress-bar.done { background: var(--accent); }
+
+  /* Kartenkopf: Name + Zielwiederholungen in einer Zeile */
+  .ex-title-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 7px; }
+  .ex-title-row .ex-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+  .ex-target { font-family: var(--mono); font-size: 11px; color: var(--muted2); white-space: nowrap; flex-shrink: 0; }
+
+  /* Gewichtsvorschlag – die Zahl, die beim Rangehen zählt */
+  .sugg-block { text-align: right; flex-shrink: 0; margin-left: 4px; }
+  .sugg-value { font-family: var(--mono); font-size: 17px; font-weight: 500; line-height: 1.1; }
+  .sugg-unit { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-top: 1px; }
+
+  /* Muskelgruppe/Pause: aus dem Kopf in die aufgeklappte Ansicht verschoben */
+  .ex-detail-meta { font-family: var(--mono); font-size: 10px; color: var(--muted2); padding: 2px 0 6px; }
   .quick-btns { display: flex; flex-direction: column; gap: 3px; }
   .quick-btns button { background: var(--bg3); border: 0.5px solid var(--border2); color: var(--text); font-family: var(--mono); font-size: 17px; font-weight: 600; width: 42px; height: 38px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
   .quick-btns button:hover { background: var(--accent); color: #090909; border-color: var(--accent); }
@@ -1963,16 +1970,18 @@ function renderDayInner() {
     const lastEntry = getLastEntryById(displayId, displayName) || getLastEntry(day.id, ei);
     const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5, displayId, displayName);
 
-    // Suggestion label
+    // Gewichtsvorschlag als eigener Block rechts – die Zahl, die beim
+    // Rangehen ans Gerät zählt. Delta kommt aus der echten Schrittweite
+    // der Übung (vorher war "+2,5 kg" fest verdrahtet und bei step=5 falsch).
     let suggLabel = '';
     if (suggestion) {
-      if (suggestion.reason === 'all') {
-        suggLabel = `<span class="sugg-badge sugg-up">↑ +2,5 kg → ${suggestion.weight} kg</span>`;
-      } else if (suggestion.reason === 'some') {
-        suggLabel = `<span class="sugg-badge sugg-half">↑ +1,25 kg → ${suggestion.weight} kg</span>`;
-      } else {
-        suggLabel = `<span class="sugg-badge sugg-same">= ${suggestion.weight} kg halten</span>`;
-      }
+      const delta = Math.round((suggestion.weight - suggestion.prevWeight) * 100) / 100;
+      const deltaStr = delta > 0 ? `↑${delta}` : 'halten';
+      const col = delta > 0 ? 'var(--accent3)' : 'var(--accent)';
+      suggLabel = `<div class="sugg-block">
+        <div class="sugg-value" style="color:${col}">${suggestion.weight}</div>
+        <div class="sugg-unit">kg · ${deltaStr}</div>
+      </div>`;
     }
 
     // Muscle color accent based on catalog category – partial match
@@ -2021,16 +2030,17 @@ function renderDayInner() {
     const progressDots = skipData
       ? `<span style="font-family:var(--mono);font-size:10px;color:var(--red)">✕ Übersprungen</span>`
       : Array.from({length: totalSets}, (_, i) =>
-          `<div class="progress-dot ${i < doneSets ? 'done' : ''}"></div>`
+          `<div class="progress-bar ${i < doneSets ? 'done' : ''}"></div>`
         ).join('');
 
     html += `
       <div class="exercise-card" style="border-left:3px solid ${skipData ? 'var(--red)' : muscleColor};border-radius:0 8px 8px 0;${skipData ? 'opacity:0.6' : ''}">
         <div class="exercise-header" onclick="toggleEx(${ei}, this)">
-          <span class="ex-num">${String(ei+1).padStart(2,'0')}</span>
-          <div style="flex:1">
-            <div class="ex-name">${displayName}${swappedName ? ' <span style="font-size:10px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</div>
-            <div class="ex-meta">${ex.muscle} · ${ex.sets}×${ex.reps} · Pause ${ex.pause}</div>
+          <div style="flex:1;min-width:0">
+            <div class="ex-title-row">
+              <span class="ex-name">${displayName}${swappedName ? ' <span style="font-size:10px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</span>
+              <span class="ex-target">${ex.reps}</span>
+            </div>
             <div class="progress-dots">${progressDots}</div>
             ${skipData ? `<div style="font-family:var(--mono);font-size:9px;color:var(--red);margin-top:2px">${skipData.reason}</div>` : ''}
           </div>
@@ -2053,6 +2063,7 @@ function renderDayInner() {
               <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px">${skipData.reason}</div>
             </div>
           ` : `
+          <div class="ex-detail-meta">${ex.muscle} · ${ex.sets} Sätze · Pause ${ex.pause}</div>
           <div class="sets-header">
             <span>Satz</span><span>Gewicht</span><span></span><span>Wdh.</span><span></span><span></span>
           </div>
@@ -2550,6 +2561,14 @@ function saveNote() {
   storageSet(noteKey, val);
 }
 
+function updateProgressBars(ei) {
+  const card = document.getElementById(`exbody-${ei}`)?.closest('.exercise-card');
+  if (!card) return;
+  const bars = card.querySelectorAll('.progress-bar');
+  const doneCount = (sessionData[ei]?.sets || []).filter(s => s.done).length;
+  bars.forEach((bar, i) => bar.classList.toggle('done', i < doneCount));
+}
+
 function toggleDone(ei, s) {
   collectInputValues();
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
@@ -2565,6 +2584,12 @@ function toggleDone(ei, s) {
 
   // Haptic feedback
   if (navigator.vibrate) navigator.vibrate(done ? [30] : [10]);
+
+  // Fortschrittsbalken der Karte sofort nachziehen. Ohne das aktualisiert
+  // sich die Anzeige erst beim nächsten vollen Neuaufbau – also erst, wenn
+  // alle Sätze erledigt sind. Genau das wirkte vorher wie "die Punkte
+  // stimmen nicht".
+  updateProgressBars(ei);
 
   if (done) {
     // Auto-copy weight and reps to next set if empty
