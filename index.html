@@ -765,6 +765,20 @@ async function cloudPull() {
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
     cloudLoaded = true;
+
+    // Änderungen, die es vor dem letzten Schließen nicht mehr in die Cloud
+    // geschafft haben, aus dem lokalen Speicher zurückholen – sonst würde
+    // der Serverstand sie stillschweigend überschreiben.
+    try {
+      const pend = JSON.parse(localStorage.getItem('gymbook:pending') || '[]');
+      let restored = 0;
+      pend.forEach(k => {
+        const raw = localStorage.getItem(k);
+        if (raw === null) return;
+        try { cloudData[k] = JSON.parse(raw); restored++; } catch(e) {}
+      });
+      if (restored) { schedulePush(); }
+    } catch(e) {}
     loadUserPlans();
     loadActivePlan();
     loadCustomPlan();
@@ -790,7 +804,7 @@ async function cloudPush() {
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
       body: JSON.stringify({ gymbook: cloudData })
     });
-    // Flush offline queue if any
+    clearPendingKeys();   // erfolgreich übertragen
     if (offlineQueue.length > 0) {
       offlineQueue = [];
       localStorage.removeItem('gymbook:offlinequeue');
@@ -814,11 +828,49 @@ window.addEventListener('online', async () => {
   }
 });
 
+// Lokal wird SOFORT geschrieben, die Cloud erst nach kurzer Ruhe einmal
+// gebündelt. Vorher ging pro Tastendruck eine Anfrage raus – ein Training
+// verbrauchte über 120 Anfragen, allein die Notiz eine pro Buchstabe.
+const CLOUD_PUSH_DELAY = 4000;
+let cloudPushTimer = null;
+
+function markPendingKey(key) {
+  try {
+    const pend = JSON.parse(localStorage.getItem('gymbook:pending') || '[]');
+    if (!pend.includes(key)) {
+      pend.push(key);
+      localStorage.setItem('gymbook:pending', JSON.stringify(pend));
+    }
+  } catch(e) {}
+}
+
+function clearPendingKeys() {
+  try { localStorage.removeItem('gymbook:pending'); } catch(e) {}
+}
+
 function storageSet(key, val) {
   cloudData[key] = val;
-  localStorage.setItem(key, JSON.stringify(val)); // local mirror
-  cloudPush();
+  localStorage.setItem(key, JSON.stringify(val));   // sofort lokal sichern
+  markPendingKey(key);                              // für den Fall eines Absturzes
+  schedulePush();
 }
+
+function schedulePush() {
+  clearTimeout(cloudPushTimer);
+  cloudPushTimer = setTimeout(() => cloudPush(), CLOUD_PUSH_DELAY);
+}
+
+// Vor dem Schließen/Wegwischen der App sofort übertragen, damit nichts
+// nur lokal liegen bleibt.
+function flushPush() {
+  if (cloudPushTimer) {
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    cloudPush();
+  }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushPush(); });
+window.addEventListener('pagehide', flushPush);
 
 function storageGet(key) {
   if (cloudLoaded && cloudData[key] !== undefined) return cloudData[key];
@@ -1575,6 +1627,41 @@ async function saveCustomPlan() {
 // Wie viele Einheiten der Plan pro Woche vorsieht. Früher aus den festen
 // Wochentagen abgeleitet – jetzt eine reine Zielzahl, weil die Reihenfolge
 // rotiert statt an Kalendertagen zu hängen.
+// Kalenderwoche (ISO) als Schlüssel, damit sich Einheiten gruppieren lassen
+function isoWeekKey(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));   // auf Donnerstag der Woche
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  const week = 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  return `${d.getFullYear()}-${String(week).padStart(2,'0')}`;
+}
+
+// Streak = Wochen IN FOLGE, in denen das Wochenziel erreicht wurde.
+// Vorher wurden schlicht Einheiten gezählt, solange zwischen zweien höchstens
+// sieben Tage lagen – vier volle Wochen ergaben dann 12 statt 4.
+// Die laufende Woche zählt nur mit, wenn das Ziel dort schon erreicht ist;
+// sie bricht die Serie aber nicht ab, solange sie noch läuft.
+function getWeekStreak() {
+  const target = getWeeklyTarget();
+  const counts = {};
+  getSessionKeys(true).forEach(k => {
+    const wk = isoWeekKey(k.split(':')[2]);
+    counts[wk] = (counts[wk] || 0) + 1;
+  });
+  let streak = 0;
+  const cursor = new Date();
+  const currentWeek = isoWeekKey(cursor.toISOString().slice(0,10));
+  if ((counts[currentWeek] || 0) >= target) streak++;
+  cursor.setDate(cursor.getDate() - 7);
+  while (true) {
+    const wk = isoWeekKey(cursor.toISOString().slice(0,10));
+    if ((counts[wk] || 0) >= target) { streak++; cursor.setDate(cursor.getDate() - 7); }
+    else break;
+  }
+  return streak;
+}
+
 function getWeeklyTarget(plan) {
   const p = plan || PLAN_DEFS[activePlanId];
   if (!p) return 3;
@@ -3366,13 +3453,15 @@ function renderStatsInner() {
   const allKeys = getSessionKeys();
   const completedKeys = getSessionKeys(true);
 
-  // Session dates map
+  // Kalender unterscheidet jetzt: voller Punkt = abgeschlossen, hohler Punkt
+  // = angefangen. Vorher zählte beides gleich, was dem Zähler "X Einheiten
+  // gesamt" darüber widersprach (der nur abgeschlossene zählt).
   const sessionDates = {};
   allKeys.forEach(k => {
     const parts = k.split(':');
     const date = parts[2]; const dayId = parts[1];
     if (!sessionDates[date]) sessionDates[date] = [];
-    sessionDates[date].push(dayId);
+    sessionDates[date].push({ dayId, done: storageGet(k)?.completed === true });
   });
 
   // Calendar
@@ -3386,8 +3475,14 @@ function renderStatsInner() {
     const isToday = dateStr === todayStr();
     const sessions = sessionDates[dateStr] || [];
     const isPast = new Date(dateStr) < new Date(todayStr());
-    const dots = sessions.map(id => `<div style="width:5px;height:5px;border-radius:50%;background:${dayColors[id]||'var(--accent)'}"></div>`).join('');
-    cells += `<div class="cal-cell ${isToday?'today':''} ${sessions.length?'has-session':''} ${isPast&&!sessions.length?'past-empty':''}" onclick="showDayDetail('${dateStr}')">
+    const dots = sessions.map(s => {
+      const col = dayColors[s.dayId] || 'var(--accent)';
+      return s.done
+        ? `<div style="width:5px;height:5px;border-radius:50%;background:${col}"></div>`
+        : `<div style="width:5px;height:5px;border-radius:50%;border:1px solid ${col};box-sizing:border-box" title="angefangen"></div>`;
+    }).join('');
+    const anyDone = sessions.some(s => s.done);
+    cells += `<div class="cal-cell ${isToday?'today':''} ${anyDone?'has-session':''} ${isPast&&!sessions.length?'past-empty':''}" onclick="showDayDetail('${dateStr}')">
       <span class="cal-day">${d}</span>
       ${dots ? `<div style="display:flex;gap:2px;justify-content:center;flex-wrap:wrap;margin-top:2px">${dots}</div>` : ''}
     </div>`;
@@ -3449,14 +3544,7 @@ function renderStatsInner() {
   const volumeEntries = Object.entries(volumeHistory).sort().slice(-8);
   const maxVolume = Math.max(...volumeEntries.map(([,v]) => v), 1);
 
-  // Streak
-  const sessionDateList = [...new Set(completedKeys.map(k => k.split(':')[2]))].sort().reverse();
-  let streak = 0;
-  let checkDate = new Date(now); checkDate.setHours(0,0,0,0);
-  for (const date of sessionDateList) {
-    const d = new Date(date); const diff = Math.round((checkDate-d)/86400000);
-    if (diff <= 7) { streak++; checkDate = d; } else break;
-  }
+  const streak = getWeekStreak();
 
   // History with search
   // Wichtig: Die angezeigten Übungsnamen kommen aus der GESPEICHERTEN Session
@@ -3564,6 +3652,7 @@ function renderStatsInner() {
           return `<div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:9px;color:var(--muted)">${d?.type||id}</span></div>`;
         }).join('')}
       </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--muted2);margin-bottom:8px">● abgeschlossen · ○ angefangen</div>
       <div class="cal-header-row">${dayNames.map(d=>`<div class="cal-header-cell">${d}</div>`).join('')}</div>
       <div class="cal-grid">${cells}</div>
     </div>
@@ -3576,7 +3665,7 @@ function renderStatsInner() {
       </div>
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:12px;text-align:center">
         <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${streak}</div>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Streak</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Wochen-Streak</div>
       </div>
       <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:8px;padding:12px;text-align:center">
         <div style="font-family:var(--display,serif);font-size:24px;font-weight:700;color:var(--accent)">${Object.keys(bestLifts).length}</div>
@@ -3586,20 +3675,29 @@ function renderStatsInner() {
 
     <!-- EINHEITEN PRO TAG -->
     ${(() => {
+      // Über ALLE Pläne zählen – sonst verschwinden Einheiten, sobald man
+      // den Plan wechselt, obwohl sie trainiert wurden.
       const sessionsByDay = {};
-      DAYS.forEach(d => { sessionsByDay[d.id] = 0; });
-      completedKeys.forEach(k => { const id = k.split(':')[1]; if (sessionsByDay[id] !== undefined) sessionsByDay[id]++; });
-      const maxD = Math.max(...Object.values(sessionsByDay), 1);
+      completedKeys.forEach(k => {
+        const id = k.split(':')[1];
+        sessionsByDay[id] = (sessionsByDay[id] || 0) + 1;
+      });
+      const allDays = Object.values(PLAN_DEFS).flatMap(p => p.days);
+      const rows = Object.keys(sessionsByDay)
+        .map(id => ({ id, count: sessionsByDay[id], def: allDays.find(d => d.id === id) }))
+        .sort((a,b) => b.count - a.count);
+      if (!rows.length) return '';
+      const maxD = Math.max(...rows.map(r => r.count), 1);
       const dayColors = DAY_COLOR_MAP;
       return `<div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
         <div style="font-family:var(--mono);font-size:10px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
-        ${DAYS.map(d => `
+        ${rows.map(({id, count, def}) => `
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:80px;flex-shrink:0">${d.type}</span>
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted);width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${def ? def.type : id.toUpperCase()}</span>
             <div style="flex:1;background:var(--bg3);border-radius:4px;height:5px;overflow:hidden">
-              <div style="height:100%;background:${dayColors[d.id]||'var(--accent)'};border-radius:4px;width:${Math.round((sessionsByDay[d.id]/maxD)*100)}%"></div>
+              <div style="height:100%;background:${dayColors[id]||'var(--accent)'};border-radius:4px;width:${Math.round((count/maxD)*100)}%"></div>
             </div>
-            <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:16px;text-align:right">${sessionsByDay[d.id]}</span>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--text);width:16px;text-align:right">${count}</span>
           </div>
         `).join('')}
       </div>`;
@@ -3749,15 +3847,7 @@ function renderHomeInner() {
   // Total sessions – only completed
   const allKeys = getSessionKeys(true);
 
-  // Streak – based on completed sessions
-  const sessionDates = [...new Set(allKeys.map(k => k.split(':')[2]))].sort().reverse();
-  let streak = 0;
-  let checkDate = new Date(now); checkDate.setHours(0,0,0,0);
-  for (const date of sessionDates) {
-    const d = new Date(date);
-    const diff = Math.round((checkDate - d) / 86400000);
-    if (diff <= 7) { streak++; checkDate = d; } else break;
-  }
+  const streak = getWeekStreak();
 
   // Last session
   const lastKey = sortByDate(allKeys, true)[0];
@@ -3925,7 +4015,7 @@ function renderHomeInner() {
       </div>
       <div class="home-stat">
         <div class="home-stat-val">${streak}</div>
-        <div class="home-stat-label">Streak</div>
+        <div class="home-stat-label">Wochen-Streak</div>
       </div>
       <div class="home-stat">
         <div class="home-stat-val">${weekDone}</div>
