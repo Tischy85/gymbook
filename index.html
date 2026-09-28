@@ -168,8 +168,8 @@
 
   .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
   @keyframes prPop { 0%{opacity:0;transform:translateX(-50%) scale(0.8)} 100%{opacity:1;transform:translateX(-50%) scale(1)} }
-  .delete-session-btn { background: none; border: none; font-size: 16px; cursor: pointer; padding: 4px; opacity: 0.4; transition: opacity 0.15s; }
-  .delete-session-btn:hover { opacity: 1; }
+  .menu-item-danger { color: var(--red); }
+  .menu-item-danger:hover { background: rgba(232,96,96,0.08); }
   .progress-dots { display: flex; gap: 4px; margin-top: 2px; }
   .progress-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--bg4); transition: background 0.2s; }
   .progress-bar.done { background: var(--accent); }
@@ -388,8 +388,11 @@
   .save-bar { position: fixed; bottom: calc(56px + env(safe-area-inset-bottom)); left: 0; right: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 8px 20px; display: flex; align-items: center; gap: 12px; z-index: 100; }
   .save-status { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 0.03em; flex: 1; }
   .save-status.saved { color: var(--accent); }
-  .finish-btn { background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 9px 18px; border-radius: 8px; cursor: pointer; white-space: nowrap; transition: background 0.15s; letter-spacing: 0.02em; }
-  .finish-btn:hover { background: var(--accent3); }
+  /* Abschluss-Knopf am Seitenende – nicht mehr in der fixierten Fußleiste */
+  .finish-wrap { padding: 20px 20px 0; margin-top: 4px; border-top: 0.5px solid var(--border); }
+  .finish-btn-large { width: 100%; background: var(--accent); color: #090909; border: none; font-family: var(--mono); font-size: 14px; font-weight: 700; padding: 16px; border-radius: 12px; cursor: pointer; transition: background 0.15s; letter-spacing: 0.02em; }
+  .finish-btn-large:hover { background: var(--accent3); }
+  .finish-btn-large:active { transform: scale(0.99); }
   .main { padding: 14px 20px 140px; }
 </style>
 </head>
@@ -428,6 +431,8 @@
   <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
   <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
   <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
+  <div class="menu-divider" id="menu-delete-divider" style="display:none"></div>
+  <button class="menu-item menu-item-danger" id="menu-delete-session" style="display:none" onclick="toggleMenu();deleteSession()"><span class="menu-item-icon">🗑</span><span id="menu-delete-label">Einheit löschen</span></button>
 </div>
 
 <div class="plan-switcher" id="plan-switcher"></div>
@@ -437,8 +442,6 @@
 <div class="save-bar" id="save-bar">
   <span class="save-status" id="save-status">Nicht gespeichert</span>
   <span class="training-end" id="training-end" style="display:none"></span>
-  <button class="delete-session-btn" id="delete-session-btn" onclick="deleteSession()" style="display:none">🗑</button>
-  <button class="finish-btn" id="finish-btn" onclick="showFinishModal()" style="display:none">Training beenden</button>
 </div>
 
 <!-- FINISH MODAL -->
@@ -919,7 +922,18 @@ function saveSession() {
     };
   });
 
-  storageSet(getKey(day.id, date), { sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds, meta: slotMeta });
+  // Startzeitpunkt mitspeichern: sessionStartTime lebt nur im Arbeitsspeicher
+  // und ginge beim Schließen der App verloren – die gemessene Dauer wäre dann
+  // zu kurz und würde die gelernte Schätzung verfälschen.
+  const prev = storageGet(getKey(day.id, date)) || {};
+  const startedAt = prev.startedAt || (sessionStartTime || Date.now());
+
+  storageSet(getKey(day.id, date), {
+    sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds,
+    meta: slotMeta, startedAt,
+    ...(prev.completed ? { completed: true } : {}),
+    ...(prev.durationMin ? { durationMin: prev.durationMin, setsDone: prev.setsDone } : {})
+  });
   dirty = false;
   const el = document.getElementById('save-status');
   const isBack = date !== todayStr();
@@ -2294,7 +2308,13 @@ function renderDayInner() {
                 <span class="history-sets ${exceeded ? 'history-exceeded' : ''}">${value}${exceeded ? ' ↑' : ''}</span>
               </div>`;
             }).join('')}
-            ${suggestion && suggestion.reason !== 'same' ? `<div class="sugg-detail">Vorschlag basiert auf übertroffenem Ziel (>${parseRepRange(ex.reps).high} Wdh.)</div>` : ''}
+            ${suggestion ? `<div class="sugg-detail">${
+              suggestion.reason === 'up'
+                ? `Alle Sätze bei ${suggestion.high} Wdh. – Zeit für mehr Gewicht`
+                : suggestion.reason === 'below'
+                  ? `Noch unter ${suggestion.low} Wdh. – Gewicht halten`
+                  : `Ziel ${suggestion.low}–${suggestion.high} noch nicht voll – Gewicht halten`
+            }</div>` : ''}
           </div>
         `;
       }
@@ -2315,6 +2335,18 @@ function renderDayInner() {
     <textarea class="session-note-input" id="session-note" placeholder="Wie war das Training heute? (optional)" oninput="saveNote()">${savedNote}</textarea>
   `;
   document.getElementById('main-content').appendChild(noteWrap);
+
+  // "Training beenden" bewusst ganz am Seitenende statt in der fixierten
+  // Fußleiste: dort lag er dauerhaft unter dem Daumen und wurde beim
+  // Scrollen zwischen den Sätzen leicht versehentlich getroffen.
+  const finishWrap = document.createElement('div');
+  finishWrap.className = 'finish-wrap';
+  finishWrap.id = 'finish-wrap';
+  finishWrap.style.display = 'none';
+  finishWrap.innerHTML = `
+    <button class="finish-btn-large" id="finish-btn" onclick="showFinishModal()">Training beenden</button>
+  `;
+  document.getElementById('main-content').appendChild(finishWrap);
 
   const statusEl = document.getElementById('save-status');
   if (statusEl) {
@@ -2373,48 +2405,33 @@ function getLastEntriesById(exerciseId, exerciseName, count) {
 }
 
 function calcWeightSuggestion(lastSets, repsTarget, step, exerciseId, exerciseName) {
-  if (!lastSets || !lastSets.length) return null;
-  const { high } = parseRepRange(repsTarget);
+  const logged = loggedSets(lastSets).filter(s => s.weight && s.reps);
+  if (!logged.length) return null;
+  const { low, high } = parseRepRange(repsTarget);
   const inc = step || 2.5;
 
-  // Get rolling average from last 3 sessions if available
-  let baseWeight = 0;
-  let allExceeded = false;
-  let anyExceeded = false;
+  // Basis ist das SCHWERSTE Gewicht der letzten Einheit – nicht der letzte
+  // Satz und kein Durchschnitt über mehrere Einheiten. Beides hatte dich
+  // zurückgezogen: bei absteigenden Sätzen (95/95/90) zählte vorher die 90,
+  // und bei sauberer Steigerung lag der Durchschnitt unter dem zuletzt
+  // tatsächlich bewegten Gewicht.
+  const maxWeight = Math.max(...logged.map(s => parseFloat(s.weight) || 0));
+  if (!maxWeight || maxWeight <= 0) return null;
 
-  if (exerciseId && exerciseName) {
-    const recent = getLastEntriesById(exerciseId, exerciseName, 3);
-    if (recent.length >= 2) {
-      const avgWeights = recent.map(sets => {
-        const logged = sets.filter(s => s.weight);
-        if (!logged.length) return 0;
-        return parseFloat(logged[logged.length - 1].weight) || 0;
-      }).filter(w => w > 0);
-      if (avgWeights.length) {
-        baseWeight = avgWeights.reduce((a, b) => a + b, 0) / avgWeights.length;
-        // Round to nearest step
-        baseWeight = Math.round(baseWeight / inc) * inc;
-      }
-      // Check if most recent session exceeded
-      const latestLogged = recent[0].filter(s => s.weight && s.reps);
-      allExceeded = latestLogged.length > 0 && latestLogged.every(s => parseInt(s.reps) > high);
-      anyExceeded = latestLogged.some(s => parseInt(s.reps) > high);
-    }
-  }
+  // Nur die Sätze auf diesem Arbeitsgewicht bewerten
+  const repsAtTop = logged
+    .filter(s => parseFloat(s.weight) === maxWeight)
+    .map(s => parseInt(s.reps) || 0);
+  if (!repsAtTop.length) return null;
 
-  // Fallback to last session only
-  if (!baseWeight) {
-    const logged = lastSets.filter(s => s.weight && s.reps);
-    if (!logged.length) return null;
-    allExceeded = logged.every(s => parseInt(s.reps) > high);
-    anyExceeded = logged.some(s => parseInt(s.reps) > high);
-    baseWeight = parseFloat(logged[logged.length - 1].weight);
-    if (isNaN(baseWeight) || baseWeight <= 0) return null;
-  }
+  // Obere Zielgrenze ERREICHT genügt (>=), nicht übertroffen (>).
+  const allReachedTop = repsAtTop.every(r => r >= high);
+  const allBelowLow  = repsAtTop.every(r => r < low);
 
-  if (allExceeded) return { weight: baseWeight + inc, reason: 'all', prevWeight: baseWeight };
-  if (anyExceeded) return { weight: baseWeight + (inc / 2), reason: 'some', prevWeight: baseWeight };
-  return { weight: baseWeight, reason: 'same', prevWeight: baseWeight };
+  // Nur ganze Schritte – halbe Stufen lassen sich am Gerät nicht einstellen.
+  if (allReachedTop) return { weight: maxWeight + inc, reason: 'up',   prevWeight: maxWeight, high, low };
+  if (allBelowLow)   return { weight: maxWeight,       reason: 'below',prevWeight: maxWeight, high, low };
+  return { weight: maxWeight, reason: 'hold', prevWeight: maxWeight, high, low };
 }
 
 function toggleEx(ei, headerEl) {
@@ -2639,29 +2656,60 @@ document.addEventListener('visibilitychange', () => {
 });
 // ─────────────────────────────────────────────────────────────
 
+// Durchschnittliche Zeit pro Satz aus abgeschlossenen Einheiten – enthält
+// automatisch Pausen, Gerätewechsel und Wartezeiten, weil die gemessene
+// Gesamtdauer zugrunde liegt. Bevorzugt Einheiten desselben Trainingstags.
+function getAvgSecondsPerSet(dayId) {
+  const collect = (filterFn) => sortByDate(getSessionKeys(true), true)
+    .filter(filterFn)
+    .map(k => storageGet(k))
+    .filter(r => r && r.durationMin > 0 && r.setsDone > 0)
+    .map(r => (r.durationMin * 60) / r.setsDone)
+    // Auch beim Lesen absichern: 30 s bis 8 min pro Satz ist der plausible
+    // Bereich. Schützt vor Altdaten oder einer Einheit, die versehentlich
+    // stundenlang offen lag.
+    .filter(sec => sec >= 30 && sec <= 480)
+    .slice(0, 5);
+
+  let samples = collect(k => k.split(':')[1] === dayId);
+  if (samples.length < 2) samples = collect(() => true);   // sonst über alle Tage
+  if (!samples.length) return null;
+  return samples.reduce((a, b) => a + b, 0) / samples.length;
+}
+
 function calcTrainingEnd() {
   const day = DAYS[currentDay];
-  let remainingSeconds = 0;
+  const learned = getAvgSecondsPerSet(day.id);
+
+  let remainingSets = 0;
+  let fallbackSeconds = 0;
+
   day.exercises.forEach((ex, ei) => {
     const sd = sessionData[ei] || { sets: [], activeSets: null };
     if (sd.skipped) return;
     const numSets = sd.activeSets != null ? sd.activeSets : ex.sets;
     const doneSets = (sd.sets || []).filter(s => s.done).length;
     const remaining = Math.max(0, numSets - doneSets);
+    if (!remaining) return;
+    remainingSets += remaining;
+
+    // Fallback ohne Messwerte: Ausführung + Pause, aber die Pause NACH dem
+    // letzten Satz einer Übung zählt nicht mit – danach geht es direkt weiter.
     const displayName = swappedExercises[ei] || ex.name;
-    // Use saved pause override if available, else plan default
     const pauseSec = defaultPauseOverrides[displayName] || parsePause(ex.pause);
-    const setTimeSec = 45;
-    remainingSeconds += remaining * (setTimeSec + pauseSec);
+    const setTimeSec = 40;
+    fallbackSeconds += remaining * setTimeSec + Math.max(0, remaining - 1) * pauseSec;
   });
-  if (remainingSeconds <= 0) return null;
+
+  if (remainingSets <= 0) return null;
+  const remainingSeconds = learned ? remainingSets * learned : fallbackSeconds;
   const end = new Date(Date.now() + remainingSeconds * 1000);
-  return `Fertig ~${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')} Uhr`;
+  const mark = learned ? '' : '?';   // ? = noch geschätzt, nicht gemessen
+  return `Fertig ~${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')} Uhr${mark}`;
 }
 
 function updateTrainingEnd() {
   const el = document.getElementById('training-end');
-  const delBtn = document.getElementById('delete-session-btn');
   const finishBtn = document.getElementById('finish-btn');
   if (!el) return;
   const result = calcTrainingEnd();
@@ -2673,8 +2721,8 @@ function updateTrainingEnd() {
   }
   // Show delete and finish buttons if session has data
   const hasData = Object.values(sessionData).some(s => s.sets?.some(x => x.weight || x.done));
-  if (delBtn) delBtn.style.display = hasData ? 'inline' : 'none';
-  if (finishBtn) finishBtn.style.display = hasData ? 'inline' : 'none';
+  const finishWrap = document.getElementById('finish-wrap');
+  if (finishWrap) finishWrap.style.display = hasData ? 'block' : 'none';
   // Track session start time
   if (hasData && !sessionStartTime) sessionStartTime = Date.now();
 }
@@ -3967,10 +4015,20 @@ function completeSession() {
     storageSet(noteKey, noteEl.value.trim());
   }
 
-  // Mark session as completed
+  // Abschließen: echte Dauer und Anzahl Sätze festhalten – daraus lernt die
+  // Fertig-Zeit-Schätzung für die nächsten Einheiten.
   const key = getKey(day.id, date);
   const existing = storageGet(key) || {};
   existing.completed = true;
+
+  const startedAt = existing.startedAt || sessionStartTime;
+  const setsDone = Object.values(sessionData)
+    .reduce((sum, s) => sum + ((s.sets || []).filter(x => x.done).length), 0);
+  if (startedAt && setsDone > 0) {
+    const mins = Math.round((Date.now() - startedAt) / 60000);
+    // Unplausible Werte verwerfen (App lief im Hintergrund, Nachtrag o. ä.)
+    if (mins >= 5 && mins <= 240) { existing.durationMin = mins; existing.setsDone = setsDone; }
+  }
   storageSet(key, existing);
   closeFinishModal();
   setStatus('✓ Training abgeschlossen!', true);
@@ -4022,7 +4080,27 @@ function toggleTimerEnabled() {
 
 function toggleMenu() {
   const menu = document.getElementById('menu-dropdown');
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  const opening = menu.style.display === 'none';
+  if (opening) updateMenuDeleteEntry();
+  menu.style.display = opening ? 'block' : 'none';
+}
+
+// "Einheit löschen" nur anbieten, wenn im Training gerade eine Einheit mit
+// Daten offen ist – und dann mit Tag und Datum im Text, damit im Menü klar
+// ist, was genau gelöscht würde.
+function updateMenuDeleteEntry() {
+  const entry = document.getElementById('menu-delete-session');
+  const divider = document.getElementById('menu-delete-divider');
+  const label = document.getElementById('menu-delete-label');
+  if (!entry) return;
+  const hasData = currentTab === 'training' && !editMode &&
+    Object.values(sessionData).some(s => s.sets?.some(x => x.weight || x.reps || x.done));
+  entry.style.display = hasData ? 'flex' : 'none';
+  if (divider) divider.style.display = hasData ? 'block' : 'none';
+  if (hasData && label) {
+    const day = DAYS[currentDay];
+    label.textContent = `Einheit löschen (${day.type}, ${formatDate(activeDateStr())})`;
+  }
 }
 document.addEventListener('click', e => {
   const menu = document.getElementById('menu-dropdown');
