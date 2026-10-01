@@ -768,6 +768,8 @@ async function cloudPull() {
     if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
     const data = await res.json();
     cloudData = data.record?.gymbook || {};
+    const receivedSize = JSON.stringify(cloudData).length;
+    decodeCloudData(cloudData);          // kompakte Cloud-Schreibweise → normale Form
     cloudLoaded = true;
 
     // Änderungen, die es vor dem letzten Schließen nicht mehr in die Cloud
@@ -789,6 +791,13 @@ async function cloudPull() {
     loadCustomPlan();
     loadCustomCatalog();
     loadPauseSettings();
+
+    // Liegt in der Cloud noch die lange Schreibweise, einmalig kompakt
+    // zurückschreiben. Danach ist beides gleich groß – kein weiterer Upload.
+    try {
+      if (JSON.stringify(compactForCloud(cloudData)).length < receivedSize * 0.95) schedulePush();
+    } catch(e) {}
+
     setStatus('☁ Synchronisiert', true);
     renderNav();
     if (currentTab === 'home') renderHome();
@@ -912,7 +921,135 @@ function compactForCloud(data) {
     if (!Object.keys(copy.swappedIds || {}).length) delete copy.swappedIds;
     out[k] = copy;
   });
+
+  // Zweite Stufe: Einheiten in die kurze Cloud-Schreibweise bringen
+  const dict = { list: [], map: {} };
+  Object.keys(out).forEach(k => {
+    if (!isSessionKey(k)) return;
+    const enc = encodeSession(out[k], dict);
+    if (enc) out[k] = enc;                 // sonst bleibt die Einheit unverändert
+  });
+  if (dict.list.length) out['gymbook:exdict'] = dict.list;
   return out;
+}
+
+// ── KOMPAKTE ABLAGE DER EINHEITEN IN DER CLOUD ────────────────
+// Im Arbeitsspeicher und im lokalen Speicher bleibt alles unverändert. Nur
+// für die Cloud wird eine Einheit kürzer geschrieben:
+//   Sätze als Text    {"weight":"92.5","reps":"7","done":true}  →  "92.5x7*"
+//   Übungsnamen       statt in jeder Einheit einmal in einem Verzeichnis
+// Beim Laden wird alles zurückübersetzt (decodeCloudData). Jede Einheit wird
+// direkt nach dem Verkürzen zurückgerechnet und mit dem Original verglichen –
+// weicht auch nur ein Zeichen ab, bleibt sie unverkürzt.
+const SET_VALUE_RE = /^[0-9.]*$/;
+
+// Vergleich unabhängig von der Reihenfolge der Schlüssel
+function canon(o) {
+  if (Array.isArray(o)) return '[' + o.map(canon).join(',') + ']';
+  if (o && typeof o === 'object') {
+    return '{' + Object.keys(o).sort().map(k => JSON.stringify(k) + ':' + canon(o[k])).join(',') + '}';
+  }
+  return JSON.stringify(o) ?? 'undefined';
+}
+
+function encodeSession(v, dict) {
+  if (!v || typeof v !== 'object' || !v.sets || typeof v.sets !== 'object' || Array.isArray(v.sets)) return null;
+  if ('s' in v || 'm' in v || '_f' in v) return null;           // Schlüssel würden kollidieren
+
+  const added = [];
+  const ref = (id, name) => {
+    const key = id + '\u0001' + name;
+    if (!(key in dict.map)) { dict.map[key] = dict.list.length; dict.list.push([id, name]); added.push(key); }
+    return dict.map[key];
+  };
+  const rollback = () => { added.reverse().forEach(key => { delete dict.map[key]; dict.list.pop(); }); };
+  const fail = () => { rollback(); return null; };
+
+  try {
+    const s = {};
+    for (const [ei, slot] of Object.entries(v.sets)) {
+      if (!slot || typeof slot !== 'object' || !Array.isArray(slot.sets)) return fail();
+      if (Object.keys(slot).some(k => k !== 'sets' && k !== 'activeSets' && k !== 'skipped')) return fail();
+      const toks = [];
+      for (const st of slot.sets) {
+        if (!st || typeof st !== 'object') return fail();
+        if (Object.keys(st).some(k => k !== 'weight' && k !== 'reps' && k !== 'done')) return fail();
+        if (typeof st.weight !== 'string' || typeof st.reps !== 'string' || typeof st.done !== 'boolean') return fail();
+        if (!SET_VALUE_RE.test(st.weight) || !SET_VALUE_RE.test(st.reps)) return fail();
+        toks.push(st.weight + 'x' + st.reps + (st.done ? '*' : ''));
+      }
+      const str = toks.join(',');
+      const extras = {};
+      if (slot.activeSets !== undefined) extras.a = slot.activeSets;
+      if (slot.skipped !== undefined) extras.k = slot.skipped;
+      s[ei] = Object.keys(extras).length ? { s: str, ...extras } : str;
+    }
+    const enc = { _f: 2, s };
+    if (v.meta !== undefined) {
+      if (!v.meta || typeof v.meta !== 'object') return fail();
+      const m = {};
+      for (const [ei, mm] of Object.entries(v.meta)) {
+        if (!mm || typeof mm.id !== 'string' || typeof mm.name !== 'string' || Object.keys(mm).length !== 2) return fail();
+        m[ei] = ref(mm.id, mm.name);
+      }
+      enc.m = m;
+    }
+    Object.keys(v).forEach(k => { if (k !== 'sets' && k !== 'meta') enc[k] = v[k]; });
+
+    // Selbstprüfung – über den echten Übertragungsweg (Text und zurück)
+    const back = decodeSession(JSON.parse(JSON.stringify(enc)), JSON.parse(JSON.stringify(dict.list)));
+    if (canon(back) !== canon(v)) return fail();
+    return enc;
+  } catch (e) { return fail(); }
+}
+
+function decodeSession(enc, list) {
+  if (!enc || enc._f !== 2) return enc;
+  const sets = {};
+  Object.entries(enc.s || {}).forEach(([ei, e]) => {
+    const str = typeof e === 'string' ? e : (e.s || '');
+    const slot = {
+      sets: str === '' ? [] : str.split(',').map(tok => {
+        const done = tok.endsWith('*');
+        const t = done ? tok.slice(0, -1) : tok;
+        const i = t.indexOf('x');
+        return { weight: t.slice(0, i), reps: t.slice(i + 1), done };
+      })
+    };
+    if (e && typeof e === 'object') {
+      if (e.a !== undefined) slot.activeSets = e.a;
+      if (e.k !== undefined) slot.skipped = e.k;
+    }
+    sets[ei] = slot;
+  });
+  const out = { sets };
+  if (enc.m) {
+    out.meta = {};
+    Object.entries(enc.m).forEach(([ei, idx]) => {
+      const p = list[idx];
+      // Fehlt der Verzeichniseintrag (dürfte nie vorkommen), gehen die SÄTZE
+      // trotzdem nicht verloren – nur der Name ist dann nicht lesbar. Wichtig,
+      // dass die Einheit danach in der normalen Form vorliegt, sonst würde
+      // sie beim nächsten Upload mit falschem Verzeichnis zurückgeschrieben.
+      out.meta[ei] = p ? { id: p[0], name: p[1] } : { id: 'unbekannt', name: '(Name nicht lesbar)' };
+    });
+  }
+  Object.keys(enc).forEach(k => { if (k !== '_f' && k !== 's' && k !== 'm') out[k] = enc[k]; });
+  return out;
+}
+
+// Beim Laden aus der Cloud alles zurück in die normale Form übersetzen.
+function decodeCloudData(data) {
+  const list = Array.isArray(data['gymbook:exdict']) ? data['gymbook:exdict'] : [];
+  delete data['gymbook:exdict'];
+  Object.keys(data).forEach(k => {
+    const v = data[k];
+    if (v && typeof v === 'object' && v._f === 2) {
+      try { data[k] = decodeSession(v, list); }
+      catch (e) { console.error('Einheit nicht lesbar:', k, e); }
+    }
+  });
+  return data;
 }
 
 // Wie viel liegt noch nur lokal?
