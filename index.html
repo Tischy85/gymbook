@@ -169,6 +169,7 @@
   .training-end { font-family: var(--mono); font-size: 10px; color: var(--accent); letter-spacing: 0.03em; margin-left: auto; white-space: nowrap; }
   @keyframes prPop { 0%{opacity:0;transform:translateX(-50%) scale(0.8)} 100%{opacity:1;transform:translateX(-50%) scale(1)} }
   .menu-item-danger { color: var(--red); }
+  .menu-storage { padding: 4px 14px 10px; }
   .menu-item-danger:hover { background: rgba(232,96,96,0.08); }
   .progress-dots { display: flex; gap: 4px; margin-top: 2px; }
   .progress-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--bg4); transition: background 0.2s; }
@@ -425,6 +426,9 @@
 <!-- Dropdown Menu -->
 <div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
   <button class="menu-item" onclick="switchTab('stats');toggleMenu()"><span class="menu-item-icon">📊</span>Statistiken</button>
+  <div class="menu-divider"></div>
+  <button class="menu-item" onclick="toggleMenu();syncNow()"><span class="menu-item-icon">☁</span><span id="menu-sync-label">Jetzt synchronisieren</span></button>
+  <div class="menu-storage" id="menu-storage"></div>
   <div class="menu-divider"></div>
   <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
   <div class="menu-divider"></div>
@@ -797,24 +801,41 @@ async function cloudPull() {
 let offlineQueue = [];
 
 async function cloudPush() {
-  if (!binId) return;
+  if (!binId) return false;
+  const payload = JSON.stringify({ gymbook: compactForCloud(cloudData) });
+  lastCloudSize = payload.length;
   try {
-    await fetch(`${JSONBIN_API}/${binId}`, {
+    const res = await fetch(`${JSONBIN_API}/${binId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
-      body: JSON.stringify({ gymbook: cloudData })
+      body: payload
     });
-    clearPendingKeys();   // erfolgreich übertragen
+    // fetch meldet nur Netzwerkausfälle als Fehler, NICHT wenn der Server
+    // ablehnt (Datei zu groß, Anfragen aufgebraucht, Schlüssel ungültig).
+    // Vorher wurde in diesem Fall die Sicherheitsliste gelöscht und
+    // "Gespeichert" angezeigt, obwohl nichts in der Cloud angekommen war.
+    if (!res.ok) {
+      let msg = '';
+      try { msg = (await res.json())?.message || ''; } catch(e) {}
+      const reason = /size|large|limit/i.test(msg) ? 'Cloud-Speicher voll'
+                   : /request/i.test(msg)         ? 'Cloud-Anfragen aufgebraucht'
+                   : `Cloud lehnt ab (${res.status})`;
+      setStatus(`⚠ ${reason} – nur lokal gesichert`, false);
+      console.warn('cloudPush abgelehnt:', res.status, msg);
+      return false;                     // Sicherheitsliste bleibt erhalten
+    }
+    clearPendingKeys();
     if (offlineQueue.length > 0) {
       offlineQueue = [];
       localStorage.removeItem('gymbook:offlinequeue');
     }
+    return true;
   } catch(e) {
-    // Save to offline queue
     offlineQueue.push(Date.now());
     localStorage.setItem('gymbook:offlinequeue', JSON.stringify(offlineQueue));
     setStatus('⚠ Offline – wird später synchronisiert', false);
     console.warn('Cloud push failed, queued for retry');
+    return false;
   }
 }
 
@@ -848,11 +869,55 @@ function clearPendingKeys() {
   try { localStorage.removeItem('gymbook:pending'); } catch(e) {}
 }
 
+// Trainingsdaten (Sätze, Notizen) gehen erst beim "Training beenden" in die
+// Cloud – während der Einheit nur lokal. Alles andere (Pläne, Katalog,
+// Körpergewicht, Einstellungen) wird wie bisher gebündelt übertragen.
+function isDeferredKey(key) {
+  return isSessionKey(key) || key.startsWith('gymbook:note:');
+}
+
 function storageSet(key, val) {
   cloudData[key] = val;
   localStorage.setItem(key, JSON.stringify(val));   // sofort lokal sichern
   markPendingKey(key);                              // für den Fall eines Absturzes
-  schedulePush();
+  if (!isDeferredKey(key)) schedulePush();
+}
+
+// Manuell aus dem Menü – überträgt sofort alles, was noch aussteht
+async function syncNow() {
+  clearTimeout(cloudPushTimer); cloudPushTimer = null;
+  setStatus('☁ Synchronisiere…', false);
+  const ok = await cloudPush();
+  if (ok) setStatus('☁ Synchronisiert', true);
+}
+
+// Unberührte Übungen (kein Gewicht, keine Wiederholung, nicht abgehakt,
+// nicht übersprungen, Satzzahl nicht geändert) werden nicht mit hochgeladen.
+// Die App legt beim Rendern für jede Übung leere Felder an – die kosteten
+// bei dir rund ein Drittel des Platzes. Lokal bleibt alles unverändert.
+let lastCloudSize = 0;
+function compactForCloud(data) {
+  const out = {};
+  Object.entries(data).forEach(([k, v]) => {
+    if (!isSessionKey(k) || !v || !v.sets) { out[k] = v; return; }
+    const sets = {}, meta = {};
+    Object.entries(v.sets).forEach(([ei, slot]) => {
+      const used = slot && (slot.skipped || slot.activeSets != null ||
+        (slot.sets || []).some(s => s && (s.weight || s.reps || s.done)));
+      if (used) { sets[ei] = slot; if (v.meta?.[ei]) meta[ei] = v.meta[ei]; }
+    });
+    const copy = { ...v, sets, meta };
+    if (!Object.keys(copy.swapped || {}).length) delete copy.swapped;
+    if (!Object.keys(copy.swappedIds || {}).length) delete copy.swappedIds;
+    out[k] = copy;
+  });
+  return out;
+}
+
+// Wie viel liegt noch nur lokal?
+function getPendingCount() {
+  try { return JSON.parse(localStorage.getItem('gymbook:pending') || '[]').length; }
+  catch(e) { return 0; }
 }
 
 function schedulePush() {
@@ -948,14 +1013,19 @@ function loadSessionData() {
     } else {
       sessionData = existing;
     }
-  } else {
-    day.exercises.forEach((ex, ei) => {
-      sessionData[ei] = { sets: [] };
-      for (let s = 0; s < ex.sets; s++) {
-        sessionData[ei].sets.push({ weight: '', reps: '', done: false });
-      }
-    });
   }
+  // Jede Übung des Tages muss einen Eintrag mit Satz-Feldern haben. Beim
+  // Hochladen werden unberührte Übungen weggelassen (spart Platz) – beim
+  // Laden werden sie hier wieder ergänzt. Ohne das würden zahlreiche Stellen,
+  // die sessionData[ei].sets direkt ansprechen, ins Leere greifen.
+  day.exercises.forEach((ex, ei) => {
+    if (!sessionData[ei]) sessionData[ei] = { sets: [] };
+    if (!Array.isArray(sessionData[ei].sets)) sessionData[ei].sets = [];
+    const target = sessionData[ei].activeSets != null ? sessionData[ei].activeSets : ex.sets;
+    while (sessionData[ei].sets.length < target) {
+      sessionData[ei].sets.push({ weight: '', reps: '', done: false });
+    }
+  });
 }
 
 function saveSession() {
@@ -3945,7 +4015,15 @@ function renderHomeInner() {
     weight: parseFloat(storageGet(k))
   })).reverse().filter(e => !isNaN(e.weight));
 
+  const storageKB = getCloudSizeKB();
+  const storageWarn = storageKB >= CLOUD_LIMIT_KB * 0.75 ? `
+    <div class="home-card" style="border-color:rgba(232,96,96,0.35);background:rgba(232,96,96,0.05)">
+      <div class="home-card-title" style="color:var(--red)">⚠ Cloud-Speicher fast voll</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5">${storageKB.toFixed(0)} von ${CLOUD_LIMIT_KB} KB belegt. Ist das Limit erreicht, landen neue Einheiten nur noch lokal auf diesem Gerät.</div>
+    </div>` : '';
+
   document.getElementById('home-content').innerHTML = `
+    ${storageWarn}
     <div class="home-greeting">
       <div class="home-greeting-title">${greeting}, Marco 👋</div>
       <div class="home-greeting-sub">${todayCompleted ? 'Starkes Training heute! 💪' : 'Bereit fürs Training?'}</div>
@@ -4120,6 +4198,7 @@ function completeSession() {
     if (mins >= 5 && mins <= 240) { existing.durationMin = mins; existing.setsDone = setsDone; }
   }
   storageSet(key, existing);
+  syncNow();   // jetzt in die Cloud – das ist der eine gewollte Sync pro Training
   closeFinishModal();
   setStatus('✓ Training abgeschlossen!', true);
   setTimeout(() => switchTab('home'), 800);
@@ -4171,8 +4250,32 @@ function toggleTimerEnabled() {
 function toggleMenu() {
   const menu = document.getElementById('menu-dropdown');
   const opening = menu.style.display === 'none';
-  if (opening) updateMenuDeleteEntry();
+  if (opening) { updateMenuDeleteEntry(); updateMenuSyncInfo(); }
   menu.style.display = opening ? 'block' : 'none';
+}
+
+// Größe, die beim Hochladen tatsächlich übertragen würde (kompaktiert)
+const CLOUD_LIMIT_KB = 100;
+function getCloudSizeKB() {
+  return JSON.stringify({ gymbook: compactForCloud(cloudData) }).length / 1024;
+}
+
+function updateMenuSyncInfo() {
+  const label = document.getElementById('menu-sync-label');
+  const box = document.getElementById('menu-storage');
+  const pending = getPendingCount();
+  if (label) label.textContent = pending ? `Jetzt synchronisieren (${pending} ausstehend)` : 'Jetzt synchronisieren';
+  if (!box) return;
+  const kb = getCloudSizeKB();
+  const pct = Math.min(100, Math.round(kb / CLOUD_LIMIT_KB * 100));
+  const col = pct >= 90 ? 'var(--red)' : pct >= 75 ? 'var(--legs)' : 'var(--accent)';
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--muted2);margin-bottom:5px">
+      <span>Cloud-Speicher</span><span style="color:${col}">${kb.toFixed(1)} / ${CLOUD_LIMIT_KB} KB</span>
+    </div>
+    <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${col}"></div>
+    </div>`;
 }
 
 // "Einheit löschen" nur anbieten, wenn im Training gerade eine Einheit mit
