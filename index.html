@@ -784,6 +784,7 @@ async function cloudPull() {
       if (restored) { schedulePush(); }
     } catch(e) {}
     loadUserPlans();
+    migratePlanStorage();
     loadActivePlan();
     loadCustomPlan();
     loadCustomCatalog();
@@ -1629,17 +1630,33 @@ let editDraft = null;
 let catalogTargetDi = 0;
 let catalogEditMode = false;
 
-function toggleEditMode() {
-  editMode = !editMode;
+// Zustand vor dem Bearbeiten. editDraft taugt dafür nicht: Löschen und
+// Anhängen verändern ihn parallel zu DAYS, er ist also kein Original.
+// Ohne Rückstellung blieb eine "abgebrochene" Änderung im Arbeitsspeicher
+// und wurde beim nächsten Speichern still mitgeschrieben.
+let editSnapshot = null;
+
+function discardPlanEdits() {
+  if (editSnapshot) {
+    editSnapshot.forEach((day, di) => { if (DAYS[di]) DAYS[di].exercises = day.exercises; });
+  }
+  editSnapshot = null;
+  editDraft = null;
+  editMode = false;
   const btn = document.getElementById('edit-plan-btn');
-  if (editMode) {
+  if (btn) { btn.classList.remove('active'); btn.textContent = '✏ Plan'; }
+}
+
+function toggleEditMode() {
+  const btn = document.getElementById('edit-plan-btn');
+  if (!editMode) {
+    editMode = true;
+    editSnapshot = JSON.parse(JSON.stringify(DAYS));
     editDraft = JSON.parse(JSON.stringify(DAYS));
     btn.classList.add('active');
     btn.textContent = '× Abbrechen';
   } else {
-    editDraft = null;
-    btn.classList.remove('active');
-    btn.textContent = '✏ Plan';
+    discardPlanEdits();            // Abbrechen = alles zurück
   }
   renderDay();
 }
@@ -1672,17 +1689,11 @@ async function saveCustomPlan() {
     });
   });
 
-  // Pläne sind pro Plan-ID getrennt gespeichert, damit ein Wechsel nichts überschreibt
-  const allCustomPlans = (() => {
-    const saved = storageGet('gymbook:customplan');
-    if (!saved) return {};
-    try { return typeof saved === 'string' ? JSON.parse(saved) : saved; } catch(e) { return {}; }
-  })();
-  allCustomPlans[activePlanId] = DAYS;
-  storageSet('gymbook:customplan', JSON.stringify(allCustomPlans));
+  persistActivePlan();
   saveCustomCatalog();
 
-  // Exit edit mode cleanly
+  // Exit edit mode cleanly – Änderungen gelten jetzt, kein Zurückstellen mehr
+  editSnapshot = null;
   editMode = false;
   editDraft = null;
   const btn = document.getElementById('edit-plan-btn');
@@ -1779,8 +1790,7 @@ function switchPlan(planId) {
   if (!PLAN_DEFS[planId] || planId === activePlanId) return;
   if (editMode) {
     if (!confirm('Du bist noch im Bearbeitungsmodus. Änderungen werden verworfen. Trotzdem wechseln?')) return;
-    editMode = false;
-    editDraft = null;
+    discardPlanEdits();
   }
   activePlanId = planId;
   DAYS = PLAN_DEFS[activePlanId].days;
@@ -1986,6 +1996,12 @@ function deleteUserPlan(planId) {
   const allUserPlans = saved ? (typeof saved === 'string' ? JSON.parse(saved) : saved) : {};
   delete allUserPlans[planId];
   storageSet('gymbook:userplans', allUserPlans);
+  // Altlast aus der früheren Doppelspeicherung ebenfalls entfernen
+  const { custom } = readPlanStores();
+  if (custom && typeof custom === 'object' && custom[planId]) {
+    delete custom[planId];
+    storageSet('gymbook:customplan', custom);
+  }
 
   if (activePlanId === planId) {
     const next = getVisiblePlans()[0];
@@ -1996,29 +2012,134 @@ function deleteUserPlan(planId) {
 }
 // ─────────────────────────────────────────────────────────────
 
+// Legt gespeicherte Anpassungen über die Tage eines Plans. Wird vom Laden UND
+// von der Umstellungs-Selbstprüfung benutzt, damit beide garantiert dasselbe
+// Ergebnis liefern.
+function applyCustomOverride(baseDays, override) {
+  if (!Array.isArray(override)) return baseDays;
+  override.forEach((day, di) => {
+    if (!baseDays[di] || !day?.exercises) return;
+    baseDays[di].exercises = day.exercises.map(ex => ({
+      ...ex,
+      id: ex.id || slugify(ex.name),      // alte Einträge ohne ID
+      alternatives: ex.alternatives || []
+    }));
+  });
+  return baseDays;
+}
+
 function loadCustomPlan() {
   const saved = storageGet('gymbook:customplan');
   if (!saved) return;
   try {
-    let allCustomPlans = typeof saved === 'string' ? JSON.parse(saved) : saved;
-    // Migration: altes Format (vor Mehrfach-Plan-Unterstützung) war ein
-    // reines Array von Tagen statt {planId: [...]}. Das gehörte damals
-    // immer zu PPL, da es der einzige Plan war.
-    if (Array.isArray(allCustomPlans)) {
-      allCustomPlans = { ppl: allCustomPlans };
-    }
-    const custom = allCustomPlans[activePlanId];
-    if (!custom || !Array.isArray(custom)) return;
-    // Restore plan – support added exercises
-    custom.forEach((day, di) => {
-      if (!DAYS[di] || !day?.exercises) return;
-      DAYS[di].exercises = day.exercises.map(ex => ({
-        ...ex,
-        id: ex.id || slugify(ex.name), // Migration: alte Einträge ohne ID
-        alternatives: ex.alternatives || []
-      }));
-    });
+    let all = typeof saved === 'string' ? JSON.parse(saved) : saved;
+    // Altformat: reines Array statt {planId: [...]} – gehörte immer zu PPL
+    if (Array.isArray(all)) all = { ppl: all };
+    applyCustomOverride(DAYS, all[activePlanId]);
   } catch(e) {}
+}
+
+// ── PLAN-SPEICHERUNG ──────────────────────────────────────────
+// Eingebaute Pläne (PPL, Ganzkörper): nur die Anpassungen, in "customplan".
+// Eigene Pläne: komplett in "userplans" – früher zusätzlich als zweite Kopie
+// in "customplan", was Platz verschwendete und zwei Wahrheiten erzeugte.
+// "alternatives" wird nirgends mehr gelesen und nicht mehr gespeichert.
+function slimDays(days) {
+  return (days || []).map(d => ({
+    ...d,
+    exercises: (d.exercises || []).map(ex => { const { alternatives, ...rest } = ex; return rest; })
+  }));
+}
+
+// Gespeicherten Wert lesen: null = fehlt, undefined = unlesbar, sonst Objekt
+function parseStored(v) {
+  if (v == null) return null;
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch(e) { return undefined; }
+}
+
+function readPlanStores() {
+  let custom = parseStored(storageGet('gymbook:customplan'));
+  const users = parseStored(storageGet('gymbook:userplans'));
+  if (Array.isArray(custom)) custom = { ppl: custom };     // Altformat
+  return { custom, users };
+}
+
+function persistActivePlan() {
+  const plan = PLAN_DEFS[activePlanId];
+  const { custom, users } = readPlanStores();
+  const customObj = (custom && typeof custom === 'object') ? custom : {};
+  const usersObj = (users && typeof users === 'object') ? users : {};
+
+  if (plan.builtin) {
+    customObj[activePlanId] = slimDays(DAYS);
+    storageSet('gymbook:customplan', customObj);
+  } else {
+    usersObj[activePlanId] = { ...plan, days: slimDays(DAYS) };
+    storageSet('gymbook:userplans', usersObj);
+    if (customObj[activePlanId]) {            // Altlast aus der Doppelspeicherung
+      delete customObj[activePlanId];
+      storageSet('gymbook:customplan', customObj);
+    }
+  }
+}
+
+// Einmalige Umstellung vom alten Format. Läuft bei jedem Laden, ändert aber
+// nur etwas, wenn noch Altformat vorliegt. Schreibt NICHTS, wenn die
+// Selbstprüfung abweicht oder Daten unlesbar sind.
+function migratePlanStorage() {
+  try {
+    const { custom, users } = readPlanStores();
+    if (custom === undefined || users === undefined) return;     // unlesbar → nichts anfassen
+    if (!custom && !users) return;
+    const oldCustom = (custom && typeof custom === 'object') ? custom : {};
+    const oldUsers  = (users  && typeof users  === 'object') ? users  : {};
+
+    const newCustom = {}, newUsers = {};
+    Object.entries(oldCustom).forEach(([pid, days]) => {
+      const isUserPlan = !!oldUsers[pid] && !PLAN_DEFS[pid]?.builtin;
+      if (isUserPlan) return;                                   // wandert nach userplans
+      newCustom[pid] = Array.isArray(days) ? slimDays(days) : days;   // inkl. Waisen unverändert lassen
+    });
+    Object.entries(oldUsers).forEach(([pid, plan]) => {
+      const merged = JSON.parse(JSON.stringify(plan));
+      applyCustomOverride(merged.days || [], oldCustom[pid]);
+      merged.days = slimDays(merged.days);
+      newUsers[pid] = merged;
+    });
+
+    // Selbstprüfung: jeder Plan muss vor und nach der Umstellung exakt
+    // dieselben Übungen ergeben. Eingebaute Pläne gegen ihre unveränderte
+    // Vorlage, eigene gegen ihre gespeicherte Definition.
+    const effective = (pid, usersSrc, customSrc) => {
+      const builtin = PLAN_DEFS[pid]?.builtin;
+      const base = builtin
+        ? JSON.parse(JSON.stringify(PLAN_DEFS[pid].days))
+        : JSON.parse(JSON.stringify(usersSrc[pid]?.days || []));
+      return JSON.stringify(slimDays(applyCustomOverride(base, customSrc[pid])));
+    };
+    const ids = new Set([...Object.keys(oldCustom), ...Object.keys(oldUsers)]);
+    for (const pid of ids) {
+      if (!PLAN_DEFS[pid]?.builtin && !oldUsers[pid]) continue;        // Waise
+      if (effective(pid, oldUsers, oldCustom) !== effective(pid, newUsers, newCustom)) {
+        console.error('Plan-Umstellung abgebrochen – Abweichung bei', pid);
+        return;
+      }
+    }
+
+    const customChanged = typeof storageGet('gymbook:customplan') === 'string'
+      || JSON.stringify(newCustom) !== JSON.stringify(oldCustom);
+    const usersChanged = JSON.stringify(newUsers) !== JSON.stringify(oldUsers);
+
+    if (customChanged && (Object.keys(newCustom).length || custom)) storageSet('gymbook:customplan', newCustom);
+    if (usersChanged) {
+      storageSet('gymbook:userplans', newUsers);
+      Object.entries(newUsers).forEach(([id, plan]) => {          // im Speicher nachziehen
+        PLAN_DEFS[id] = plan;
+        plan.days.forEach(day => { if (day.color?.startsWith('#')) DAY_COLOR_MAP[day.id] = day.color; });
+      });
+    }
+  } catch(e) { console.error('Plan-Umstellung fehlgeschlagen', e); }
 }
 
 function loadCustomCatalog() {
@@ -3299,10 +3420,7 @@ function switchTab(tab) {
   // Warn if in edit mode and switching away from training
   if (editMode && tab !== 'training') {
     if (!confirm('Du bist noch im Bearbeitungsmodus. Änderungen werden verworfen. Trotzdem wechseln?')) return;
-    editMode = false;
-    editDraft = null;
-    const btn = document.getElementById('edit-plan-btn');
-    if (btn) { btn.classList.remove('active'); btn.textContent = '✏ Plan'; }
+    discardPlanEdits();
   }
   currentTab = tab;
   document.getElementById('home-page').style.display = tab === 'home' ? 'block' : 'none';
