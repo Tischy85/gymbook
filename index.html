@@ -186,6 +186,15 @@
   #timer-track { fill: none; stroke: var(--bg4); stroke-width: 6; }
   #timer-progress { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 327; stroke-dashoffset: 0; transition: stroke-dashoffset 1s linear; }
   #timer-time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--sans); font-size: 40px; font-weight: 700; color: var(--text); letter-spacing: -1px; }
+  #timer-rir { margin-bottom: 12px; text-align: center; }
+  .rir-label { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .rir-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .rir-btn { background: var(--bg3); border: none; color: var(--text); font-size: 15px; font-weight: 600; padding: 10px 0; border-radius: 10px; cursor: pointer; }
+  .rir-btn.active { background: var(--accent); color: var(--on-accent); }
+  .warmup-row .set-num { font-weight: 700; color: var(--legs); }
+  .warmup-row .set-input { font-size: 15px; padding-top: 7px; padding-bottom: 7px; }
+  .warmup-row .check-btn { width: 28px; height: 28px; }
+  .stag-hint { font-size: 12px; color: var(--legs); margin-top: 4px; }
   #timer-next-info { margin-bottom: 10px; text-align: center; }
   #timer-next-label { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   #timer-next-inputs { display: flex; gap: 10px; justify-content: center; }
@@ -483,7 +492,7 @@
   <button class="menu-item" onclick="toggleMenu();openCloudKeyModal()"><span class="menu-item-icon">🔑</span>Cloud-Schlüssel</button>
   <div class="menu-storage" id="menu-storage"></div>
   <div class="menu-divider"></div>
-  <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
+  <button class="menu-item" onclick="toggleMenu();openTimerSettings()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
   <div class="menu-divider"></div>
   <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
   <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
@@ -588,6 +597,7 @@
       </svg>
       <div id="timer-time">0:00</div>
     </div>
+    <div id="timer-rir"></div>
     <div id="timer-next-info" style="display:none">
       <div id="timer-next-label"></div>
       <div id="timer-next-inputs" style="display:flex;gap:8px;justify-content:center;margin-top:6px"></div>
@@ -1131,8 +1141,9 @@ function compactForCloud(data) {
     if (!isSessionKey(k) || !v || !v.sets) { out[k] = v; return; }
     const sets = {}, meta = {};
     Object.entries(v.sets).forEach(([ei, slot]) => {
+      const touched = arr => (arr || []).some(s => s && (s.weight || s.reps || s.done));
       const used = slot && (slot.skipped || slot.activeSets != null ||
-        (slot.sets || []).some(s => s && (s.weight || s.reps || s.done)));
+        touched(slot.sets) || touched(slot.warmup));
       if (used) { sets[ei] = slot; if (v.meta?.[ei]) meta[ei] = v.meta[ei]; }
     });
     const copy = { ...v, sets, meta };
@@ -1156,6 +1167,8 @@ function compactForCloud(data) {
 // Im Arbeitsspeicher und im lokalen Speicher bleibt alles unverändert. Nur
 // für die Cloud wird eine Einheit kürzer geschrieben:
 //   Sätze als Text    {"weight":"92.5","reps":"7","done":true}  →  "92.5x7*"
+//                     mit RIR {…,"rir":2}                         →  "92.5x7~2*"
+//   Aufwärmsätze      genauso, im Feld "w" des Slots
 //   Übungsnamen       statt in jeder Einheit einmal in einem Verzeichnis
 // Beim Laden wird alles zurückübersetzt (decodeCloudData). Jede Einheit wird
 // direkt nach dem Verkürzen zurückgerechnet und mit dem Original verglichen –
@@ -1184,23 +1197,36 @@ function encodeSession(v, dict) {
   const rollback = () => { added.reverse().forEach(key => { delete dict.map[key]; dict.list.pop(); }); };
   const fail = () => { rollback(); return null; };
 
+  // Liste von Sätzen → "92.5x7~2*,90x8" (null = nicht darstellbar)
+  const encList = arr => {
+    if (!Array.isArray(arr)) return null;
+    const toks = [];
+    for (const st of arr) {
+      if (!st || typeof st !== 'object') return null;
+      if (Object.keys(st).some(k => k !== 'weight' && k !== 'reps' && k !== 'done' && k !== 'rir')) return null;
+      if (typeof st.weight !== 'string' || typeof st.reps !== 'string' || typeof st.done !== 'boolean') return null;
+      if (!SET_VALUE_RE.test(st.weight) || !SET_VALUE_RE.test(st.reps)) return null;
+      if (st.rir !== undefined && !(Number.isInteger(st.rir) && st.rir >= 0 && st.rir <= 9)) return null;
+      toks.push(st.weight + 'x' + st.reps + (st.rir !== undefined ? '~' + st.rir : '') + (st.done ? '*' : ''));
+    }
+    return toks.join(',');
+  };
+
   try {
     const s = {};
     for (const [ei, slot] of Object.entries(v.sets)) {
       if (!slot || typeof slot !== 'object' || !Array.isArray(slot.sets)) return fail();
-      if (Object.keys(slot).some(k => k !== 'sets' && k !== 'activeSets' && k !== 'skipped')) return fail();
-      const toks = [];
-      for (const st of slot.sets) {
-        if (!st || typeof st !== 'object') return fail();
-        if (Object.keys(st).some(k => k !== 'weight' && k !== 'reps' && k !== 'done')) return fail();
-        if (typeof st.weight !== 'string' || typeof st.reps !== 'string' || typeof st.done !== 'boolean') return fail();
-        if (!SET_VALUE_RE.test(st.weight) || !SET_VALUE_RE.test(st.reps)) return fail();
-        toks.push(st.weight + 'x' + st.reps + (st.done ? '*' : ''));
-      }
-      const str = toks.join(',');
+      if (Object.keys(slot).some(k => k !== 'sets' && k !== 'activeSets' && k !== 'skipped' && k !== 'warmup')) return fail();
+      const str = encList(slot.sets);
+      if (str === null) return fail();
       const extras = {};
       if (slot.activeSets !== undefined) extras.a = slot.activeSets;
       if (slot.skipped !== undefined) extras.k = slot.skipped;
+      if (slot.warmup !== undefined) {
+        const w = encList(slot.warmup);
+        if (w === null) return fail();
+        extras.w = w;
+      }
       s[ei] = Object.keys(extras).length ? { s: str, ...extras } : str;
     }
     const enc = { _f: 2, s };
@@ -1225,19 +1251,24 @@ function encodeSession(v, dict) {
 function decodeSession(enc, list) {
   if (!enc || enc._f !== 2) return enc;
   const sets = {};
+  const decList = str => str === '' ? [] : str.split(',').map(tok => {
+    const done = tok.endsWith('*');
+    let t = done ? tok.slice(0, -1) : tok;
+    let rir;
+    const r = t.indexOf('~');
+    if (r >= 0) { rir = parseInt(t.slice(r + 1), 10); t = t.slice(0, r); }
+    const i = t.indexOf('x');
+    const st = { weight: t.slice(0, i), reps: t.slice(i + 1), done };
+    if (rir !== undefined) st.rir = rir;
+    return st;
+  });
   Object.entries(enc.s || {}).forEach(([ei, e]) => {
     const str = typeof e === 'string' ? e : (e.s || '');
-    const slot = {
-      sets: str === '' ? [] : str.split(',').map(tok => {
-        const done = tok.endsWith('*');
-        const t = done ? tok.slice(0, -1) : tok;
-        const i = t.indexOf('x');
-        return { weight: t.slice(0, i), reps: t.slice(i + 1), done };
-      })
-    };
+    const slot = { sets: decList(str) };
     if (e && typeof e === 'object') {
       if (e.a !== undefined) slot.activeSets = e.a;
       if (e.k !== undefined) slot.skipped = e.k;
+      if (e.w !== undefined) slot.warmup = decList(e.w);
     }
     sets[ei] = slot;
   });
@@ -1441,6 +1472,13 @@ function collectInputValues() {
       if (wEl) sessionData[ei].sets[s].weight = wEl.value;
       if (rEl) sessionData[ei].sets[s].reps = rEl.value;
     }
+    // Aufwärmsätze (nur die gerade angezeigten haben Eingabefelder)
+    (sessionData[ei]?.warmup || []).forEach((w, k) => {
+      const wEl = document.getElementById(`ww-${ei}-${k}`);
+      const rEl = document.getElementById(`wr-${ei}-${k}`);
+      if (wEl) w.weight = wEl.value;
+      if (rEl) w.reps = rEl.value;
+    });
   });
 }
 
@@ -1479,9 +1517,25 @@ function loggedSets(sets) {
 
 // Einheitliche Darstellung eines Satzes: "80kg×8" bzw. "12 Wdh." ohne Gewicht.
 function formatSet(s, opts) {
-  const sep = (opts && opts.long) ? ' kg × ' : 'kg×';
-  if (s.weight) return `${s.weight}${sep}${s.reps || '?'}${(opts && opts.long) ? ' Wdh.' : ''}`;
-  return `${s.reps || '?'} Wdh.`;
+  const long = opts && opts.long;
+  const rir = s.rir !== undefined ? ` · RIR ${s.rir === 4 ? '4+' : s.rir}` : '';
+  const sep = long ? ' kg × ' : 'kg×';
+  if (s.weight) return `${s.weight}${sep}${s.reps || '?'}${long ? ' Wdh.' : ''}${rir}`;
+  return `${s.reps || '?'} Wdh.${rir}`;
+}
+
+// Geschätztes Maximalgewicht für 1 Wiederholung (Epley-Formel). Macht Sätze
+// mit unterschiedlichen Wiederholungszahlen vergleichbar: 80 kg × 10 ergibt
+// ≈ 107 kg und schlägt damit 82,5 kg × 5 (≈ 96 kg). Über 12 Wdh. wird die
+// Formel ungenau – dann wird mit 12 gerechnet. Ergebnis auf 0,5 kg gerundet.
+function e1rm(weight, reps) {
+  const w = parseFloat(weight), r = parseInt(reps, 10);
+  if (!(w > 0) || !(r > 0)) return 0;
+  const est = r === 1 ? w : w * (1 + Math.min(r, 12) / 30);
+  return Math.round(est * 2) / 2;
+}
+function bestE1rm(sets) {
+  return Math.max(0, ...(sets || []).map(s => e1rm(s?.weight, s?.reps)));
 }
 
 // Bester Wert einer Übung für Listenanzeigen: kg wenn vorhanden, sonst Wdh.
@@ -1571,6 +1625,27 @@ function getPersonalRecordById(exerciseId, exerciseName, excludeKey) {
     e.sets.forEach(s => { const w = parseFloat(s?.weight); if (!isNaN(w) && w > best) best = w; });
   });
   return best;
+}
+
+// Bestes geschätztes 1RM über alle Einheiten (excludeKey wie oben)
+function getBestE1rmById(exerciseId, exerciseName, excludeKey) {
+  let best = 0;
+  getExerciseEntries(exerciseId, exerciseName).forEach(e => {
+    if (e.key !== excludeKey) best = Math.max(best, bestE1rm(e.sets));
+  });
+  return best;
+}
+
+// Stagnation: Die letzten 3 Einheiten waren nicht besser als die davor.
+// Gemessen am besten geschätzten 1RM je Einheit, bei Übungen ohne Gewicht
+// an den meisten Wiederholungen. Braucht mindestens 4 Einheiten.
+function getStagnation(exerciseId, exerciseName) {
+  const sessions = getLastEntriesById(exerciseId, exerciseName, 4);
+  if (sessions.length < 4) return null;
+  const score = sets => bestE1rm(sets) || Math.max(0, ...loggedSets(sets).map(s => parseInt(s.reps, 10) || 0));
+  const [a, b, c, before] = sessions.map(score);
+  if (!before) return null;
+  return Math.max(a, b, c) <= before ? { sessions: 3, value: before } : null;
 }
 // ─────────────────────────────────────────────────────────────
 
@@ -1785,6 +1860,39 @@ let catalogTargetEi = null;
 let catalogAppendMode = false;
 let catalogAppendDi = null;
 let catalogActiveMuscle = 'brust';
+
+// Farben je Muskelgruppe (Katalog-Schlüssel) – Kartenrand und Statistik
+const MUSCLE_COLORS = {
+  brust:   '#e87f7f',  // Rot
+  trizeps: '#e8a060',  // Orange/Koralle
+  ruecken: '#7fb8e8',  // Blau
+  bizeps:  '#5dcaa5',  // Türkis
+  schulter:'#9b7fe8',  // Lila
+  beine:   '#e8b87f',  // Orange warm
+  bauch:   '#c9a84c'   // Gold
+};
+
+// Muskelgruppe einer Übung als Katalog-Schlüssel (brust, ruecken, …) oder
+// null. Reihenfolge: exakt per ID im Katalog, dann per Namensteil (z. B.
+// "Brustpresse Maschine (anderer Winkel)"), zuletzt über das Muskelfeld
+// des Plans.
+function muscleCategory(id, name, muscleText) {
+  const cats = Object.entries(CATALOG);
+  for (const [key, cat] of cats) if (cat.exercises.some(e => e?.id === id)) return key;
+  const n = (name || '').toLowerCase();
+  if (n) for (const [key, cat] of cats) {
+    if (cat.exercises.some(e => e?.name && (n.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(n)))) return key;
+  }
+  const m = (muscleText || '').toLowerCase();
+  if (m.includes('trizeps')) return 'trizeps';
+  if (m.includes('bizeps') || m.includes('brachialis')) return 'bizeps';
+  if (m.includes('brust')) return 'brust';
+  if (m.includes('rücken') || m.includes('lat')) return 'ruecken';
+  if (m.includes('schulter')) return 'schulter';
+  if (m.includes('bein') || m.includes('waden') || m.includes('gluteus') || m.includes('hamstring') || m.includes('quadrizeps')) return 'beine';
+  if (m.includes('bauch')) return 'bauch';
+  return null;
+}
 
 function getMuscleCategoryForExercise(exerciseName) {
   for (const [key, cat] of Object.entries(CATALOG)) {
@@ -2079,6 +2187,8 @@ async function saveCustomPlan() {
       const repsEl = document.getElementById(`edit-reps-${di}-${ei}`);
       const pauseEl = document.getElementById(`edit-pause-${di}-${ei}`);
       const stepEl = document.getElementById(`edit-step-${di}-${ei}`);
+      const warmEl = document.getElementById(`edit-warmup-${di}-${ei}`);
+      if (warmEl) editDraft[di].exercises[ei].warmup = warmEl.value === '' ? undefined : parseInt(warmEl.value, 10);
       if (setsEl) editDraft[di].exercises[ei].sets = parseInt(setsEl.value) || ex.sets;
       if (repsEl) editDraft[di].exercises[ei].reps = repsEl.value || ex.reps;
       if (pauseEl) editDraft[di].exercises[ei].pause = pauseEl.value || ex.pause;
@@ -2095,6 +2205,8 @@ async function saveCustomPlan() {
       DAYS[di].exercises[ei].reps   = ex.reps;
       DAYS[di].exercises[ei].pause  = ex.pause;
       if (ex.step) DAYS[di].exercises[ei].step = ex.step;
+      if (Number.isInteger(ex.warmup)) DAYS[di].exercises[ei].warmup = ex.warmup;
+      else delete DAYS[di].exercises[ei].warmup;          // zurück auf "Auto"
     });
   });
 
@@ -2696,6 +2808,13 @@ function renderEditDay() {
               <option value="5"    ${(ex.step||2.5)==5?'selected':''}>5 kg</option>
             </select>
           </div>
+          <div class="edit-field">
+            <label>Aufwärmen</label>
+            <select id="edit-warmup-${di}-${ei}" style="background:var(--field);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:16px;padding:8px;border-radius:4px;width:100%;outline:none;">
+              <option value="" ${!Number.isInteger(ex.warmup)?'selected':''}>Auto</option>
+              ${[0,1,2,3].map(n => `<option value="${n}" ${ex.warmup===n?'selected':''}>${n}</option>`).join('')}
+            </select>
+          </div>
         </div>
       </div>
     `;
@@ -2849,36 +2968,9 @@ function renderDayInner() {
       </div>`;
     }
 
-    // Muscle color accent based on catalog category – partial match
-    const muscleColor = (() => {
-      const nameLower = displayName.toLowerCase();
-      const muscleLower = ex.muscle.toLowerCase();
-
-      // Check catalog first with partial match
-      for (const [key, cat] of Object.entries(CATALOG)) {
-        if (cat.exercises.some(e => e?.name && (nameLower.includes(e.name.toLowerCase()) || e.name.toLowerCase().includes(nameLower)))) {
-          const colors = {
-            brust:   '#e87f7f',  // Rot
-            trizeps: '#e8a060',  // Orange/Koralle
-            ruecken: '#7fb8e8',  // Blau
-            bizeps:  '#5dcaa5',  // Türkis
-            schulter:'#9b7fe8',  // Lila
-            beine:   '#e8b87f',  // Orange warm
-            bauch:   '#c9a84c'   // Gold
-          };
-          return colors[key] || 'var(--muted2)';
-        }
-      }
-      // Fallback via muscle field
-      if (muscleLower.includes('trizeps')) return '#e8a060';
-      if (muscleLower.includes('bizeps') || muscleLower.includes('brachialis')) return '#5dcaa5';
-      if (muscleLower.includes('brust')) return '#e87f7f';
-      if (muscleLower.includes('rücken') || muscleLower.includes('lat') || muscleLower.includes('mittelrücken')) return '#7fb8e8';
-      if (muscleLower.includes('schulter')) return '#9b7fe8';
-      if (muscleLower.includes('bein') || muscleLower.includes('waden') || muscleLower.includes('gluteus') || muscleLower.includes('hamstring')) return '#e8b87f';
-      if (muscleLower.includes('bauch')) return '#c9a84c';
-      return 'var(--muted2)';
-    })();
+    // Farbiger Rand nach Muskelgruppe
+    const muscleColor = MUSCLE_COLORS[muscleCategory(displayId, displayName, ex.muscle)] || 'var(--muted2)';
+    const stagnation = sd.skipped ? null : getStagnation(displayId, displayName);
 
     // Determine active set count (plan default or user-adjusted)
     const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
@@ -2908,6 +3000,7 @@ function renderDayInner() {
             </div>
             <div class="progress-dots">${progressDots}</div>
             ${skipData ? `<div style="font-family:var(--mono);font-size:12px;color:var(--red);margin-top:2px">${esc(skipData.reason)}</div>` : ''}
+            ${stagnation ? `<div class="stag-hint">⚠ Seit ${stagnation.sessions} Einheiten kein Fortschritt</div>` : ''}
           </div>
           ${suggLabel}
           ${timerExerciseName === displayName && document.getElementById('timer-overlay')?.style.display !== 'none' ? '<span style="font-family:var(--mono);font-size:12px;color:var(--accent);margin-left:4px">⏱</span>' : ''}
@@ -2942,6 +3035,28 @@ function renderDayInner() {
     }
 
     const step = ex.step || 2.5;
+
+    // Aufwärmsätze: eigene Zeilen "W" vor den Arbeitssätzen. Sie liegen
+    // getrennt in slot.warmup – Rekorde, Vorschläge, Volumen und Satzzähler
+    // lesen nur slot.sets und bleiben davon unberührt.
+    const warmCount = skipData ? 0 : getWarmupCount(day, ei);
+    if (warmCount) {
+      if (!Array.isArray(sessionData[ei].warmup)) sessionData[ei].warmup = [];
+      while (sessionData[ei].warmup.length < warmCount) sessionData[ei].warmup.push({ weight: '', reps: '', done: false });
+      const workWeight = suggestion ? suggestion.weight : Math.max(0, ...loggedSets(lastEntry).map(st => parseFloat(st.weight) || 0));
+      warmupTargets(warmCount, workWeight, step).forEach((t, k) => {
+        const w = sessionData[ei].warmup[k];
+        html += `
+        <div class="set-row warmup-row">
+          <span class="set-num">W</span>
+          <input class="set-input ${w.done?'done':''}" id="ww-${ei}-${k}" type="number" step="${step}" min="0" placeholder="${esc(t.weight || '—')}" value="${esc(w.weight)}" oninput="markDirty()" onchange="autoSave()">
+          <div></div>
+          <input class="set-input ${w.done?'done':''}" id="wr-${ei}-${k}" type="number" min="0" placeholder="${t.reps}" value="${esc(w.reps)}" oninput="markDirty()" onchange="autoSave()">
+          <div></div>
+          <button class="check-btn ${w.done?'checked':''}" id="wchk-${ei}-${k}" onclick="toggleWarmup(${ei},${k})">✓</button>
+        </div>`;
+      });
+    }
 
     if (!skipData) {
     for (let s = 0; s < activeSets; s++) {
@@ -3003,7 +3118,9 @@ function renderDayInner() {
               </div>`;
             }).join('')}
             ${suggestion ? `<div class="sugg-detail">${
-              suggestion.reason === 'up'
+              suggestion.reason === 'upfast'
+                ? `Alle Sätze bei ${suggestion.high} Wdh. mit 3+ in Reserve – doppelter Schritt`
+              : suggestion.reason === 'up'
                 ? `Alle Sätze bei ${suggestion.high} Wdh. – Zeit für mehr Gewicht`
                 : suggestion.reason === 'below'
                   ? `Noch unter ${suggestion.low} Wdh. – Gewicht halten`
@@ -3055,6 +3172,53 @@ function renderDayInner() {
   updateTrainingEnd();
 }
 
+// ── AUFWÄRMSÄTZE ──────────────────────────────────────────────
+// Im Plan pro Übung einstellbar (ex.warmup = 0–3). Ohne Einstellung gilt die
+// Automatik: 2 Aufwärmsätze bei der ERSTEN Übung einer großen Muskelgruppe
+// (Brust, Rücken, Beine) im Training. Arme, Schultern und Bauch sind durch
+// die vorherigen Übungen meist schon warm.
+const AUTO_WARMUP_GROUPS = ['brust', 'ruecken', 'beine'];
+const AUTO_WARMUP_SETS = 2;
+
+function slotCategory(day, ei) {
+  const ex = day.exercises[ei];
+  return muscleCategory(swappedExerciseIds[ei] || ex.id, swappedExercises[ei] || ex.name, ex.muscle);
+}
+
+function getWarmupCount(day, ei) {
+  const ex = day.exercises[ei];
+  if (Number.isInteger(ex.warmup)) return ex.warmup;
+  const cat = slotCategory(day, ei);
+  if (!AUTO_WARMUP_GROUPS.includes(cat)) return 0;
+  for (let j = 0; j < ei; j++) if (slotCategory(day, j) === cat) return 0;
+  return AUTO_WARMUP_SETS;
+}
+
+// Vorschläge (als Platzhalter) für die Aufwärmsätze: steigend bis ca. 75 %
+// des Arbeitsgewichts, mit abnehmenden Wiederholungen. Auf die Schrittweite
+// der Übung gerundet.
+function warmupTargets(count, workWeight, step) {
+  const plans = { 1: [[0.6, 8]], 2: [[0.5, 10], [0.75, 5]], 3: [[0.4, 10], [0.6, 6], [0.8, 3]] };
+  const plan = plans[count] || plans[3].slice(0, count);
+  return plan.map(([f, reps]) => ({
+    weight: workWeight > 0 ? Math.max(step, Math.round(workWeight * f / step) * step) : '',
+    reps
+  }));
+}
+
+function toggleWarmup(ei, k) {
+  collectInputValues();
+  const w = sessionData[ei]?.warmup?.[k];
+  if (!w) return;
+  w.done = !w.done;
+  ['wchk', 'ww', 'wr'].forEach(p => {
+    const el = document.getElementById(`${p}-${ei}-${k}`);
+    if (el) el.classList.toggle(p === 'wchk' ? 'checked' : 'done', w.done);
+  });
+  unlockAudio();
+  autoSave();
+}
+
 function parseRepRange(repsStr) {
   const parts = repsStr.split(/[–\-]/);
   if (parts.length === 2) return { low: parseInt(parts[0]), high: parseInt(parts[1]) };
@@ -3077,16 +3241,19 @@ function calcWeightSuggestion(lastSets, repsTarget, step) {
   if (!maxWeight || maxWeight <= 0) return null;
 
   // Nur die Sätze auf diesem Arbeitsgewicht bewerten
-  const repsAtTop = logged
-    .filter(s => parseFloat(s.weight) === maxWeight)
-    .map(s => parseInt(s.reps) || 0);
+  const topSets = logged.filter(s => parseFloat(s.weight) === maxWeight);
+  const repsAtTop = topSets.map(s => parseInt(s.reps) || 0);
   if (!repsAtTop.length) return null;
 
   // Obere Zielgrenze ERREICHT genügt (>=), nicht übertroffen (>).
   const allReachedTop = repsAtTop.every(r => r >= high);
   const allBelowLow  = repsAtTop.every(r => r < low);
+  // Alle Sätze auf dem Arbeitsgewicht mit RIR erfasst und ≥ 3 in Reserve:
+  // Das Gewicht war deutlich zu leicht – dann ein doppelter Schritt.
+  const plentyLeft = topSets.every(s => s.rir !== undefined && s.rir >= 3);
 
   // Nur ganze Schritte – halbe Stufen lassen sich am Gerät nicht einstellen.
+  if (allReachedTop && plentyLeft) return { weight: maxWeight + 2 * inc, reason: 'upfast', prevWeight: maxWeight, high, low };
   if (allReachedTop) return { weight: maxWeight + inc, reason: 'up',   prevWeight: maxWeight, high, low };
   if (allBelowLow)   return { weight: maxWeight,       reason: 'below',prevWeight: maxWeight, high, low };
   return { weight: maxWeight, reason: 'hold', prevWeight: maxWeight, high, low };
@@ -3147,11 +3314,34 @@ async function startTimer(seconds, exerciseName, ei, s) {
   document.getElementById('timer-overlay').style.display = 'flex';
   document.getElementById('timer-progress').style.stroke = 'var(--accent)';
 
+  renderRirPicker(ei, s);
   // Show next set/exercise info
   showTimerNextInfo(ei, s);
 
   updateTimerDisplay();
   timerInterval = setInterval(timerTick, 250);
+}
+
+// RIR = "Reps in Reserve": wie viele Wiederholungen wären noch gegangen?
+// Abgefragt im Pausentimer direkt nach dem Abhaken. 4 steht für "4 oder mehr".
+const RIR_OPTIONS = [0, 1, 2, 3, 4];
+function renderRirPicker(ei, s) {
+  const el = document.getElementById('timer-rir');
+  const cur = sessionData[ei]?.sets?.[s]?.rir;
+  el.innerHTML = `
+    <div class="rir-label">Wie viele Wdh. wären noch gegangen?</div>
+    <div class="rir-row">
+      ${RIR_OPTIONS.map(v => `<button class="rir-btn ${cur === v ? 'active' : ''}" onclick="setRir(${ei},${s},${v})">${v === 4 ? '4+' : v}</button>`).join('')}
+    </div>`;
+}
+
+function setRir(ei, s, v) {
+  const set = sessionData[ei]?.sets?.[s];
+  if (!set) return;
+  set.rir = set.rir === v ? undefined : v;   // erneutes Tippen hebt die Auswahl auf
+  if (set.rir === undefined) delete set.rir;
+  saveSession();
+  renderRirPicker(ei, s);
 }
 
 function showTimerNextInfo(ei, s) {
@@ -3218,6 +3408,10 @@ function timerTick() {
   const remaining = getRemainingSeconds();
   if (remaining <= 0) {
     clearInterval(timerInterval);
+    // Ton nur, wenn das Ende gerade eben bei offener App erreicht wurde –
+    // nicht nachträglich beim Zurückkehren aus einer anderen App.
+    const overdue = Date.now() - (timerStartTime + timerTotal * 1000);
+    if (document.visibilityState === 'visible' && overdue < 2000) playTimerBeep();
     timerStartTime = null;
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     document.getElementById('timer-progress').style.stroke = 'var(--pull)';
@@ -3400,10 +3594,10 @@ function deleteSession() {
   setStatus('Einheit gelöscht', false);
 }
 
-function showPRCelebration(exerciseName, weight) {
+function showPRCelebration(text) {
   const el = document.createElement('div');
   el.style.cssText = `position:fixed;top:80px;left:50%;transform:translateX(-50%);background:var(--accent);color:var(--on-accent);font-family:var(--sans);font-size:13px;font-weight:600;padding:10px 20px;border-radius:20px;z-index:999;white-space:nowrap;animation:prPop 0.3s ease`;
-  el.textContent = `🏆 Neuer Rekord! ${weight} kg`;
+  el.textContent = text;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3000);
 }
@@ -3488,7 +3682,18 @@ function toggleDone(ei, s) {
         .filter((st, i) => i !== s && st.done)
         .map(st => parseFloat(st.weight) || 0));
       // pr > 0: beim allerersten Training einer Übung gibt es keinen Rekord zu brechen
-      if (pr > 0 && weight > pr && weight > todayBest) showPRCelebration(displayName, weight);
+      if (pr > 0 && weight > pr && weight > todayBest) {
+        showPRCelebration(`🏆 Neuer Rekord! ${weight} kg`);
+      } else {
+        // Kein Gewichtsrekord, aber vielleicht mehr Wiederholungen als je
+        // zuvor auf diesem Niveau – gemessen am geschätzten 1RM.
+        const cur = sessionData[ei].sets[s];
+        const est = e1rm(cur.weight, cur.reps);
+        const prevBest = Math.max(
+          getBestE1rmById(displayId, displayName, getKey(DAYS[currentDay].id, activeDateStr())),
+          bestE1rm(sessionData[ei].sets.filter((st, i) => i !== s && st.done)));
+        if (prevBest > 0 && est > prevBest) showPRCelebration(`🏆 Bestleistung! ${cur.weight} kg × ${cur.reps} (≈ ${est} kg 1RM)`);
+      }
     }
 
     // Check if all sets done → auto-collapse
@@ -3513,7 +3718,9 @@ function toggleDone(ei, s) {
     const ex = DAYS[currentDay].exercises[ei];
     const displayName = swappedExercises[ei] || ex.name;
     const seconds = defaultPauseOverrides[displayName] || parsePause(ex.pause);
+    unlockAudio();
     startTimer(seconds, displayName, ei, s);
+    runTimerShortcut(seconds);
   } else if (!done) {
     closeTimer();
   }
@@ -3894,6 +4101,9 @@ function showExerciseDetail(exerciseId, exerciseName) {
   const lastFilled = loggedSets(lastSets);
   const bestDisplay = best > 0 ? { value: best, unit: 'kg' } : bestSetValue(lastSets);
   const lastDisplay = bestSetValue(lastSets);
+  const bestE1 = getBestE1rmById(exerciseId, exerciseName);
+  const lastE1 = bestE1rm(lastSets);
+  const stagnation = getStagnation(exerciseId, exerciseName);
 
   // Verlauf: Gewicht wenn vorhanden, sonst Wiederholungen (Körpergewichtsübungen)
   const weights = history.map(sets => {
@@ -3916,6 +4126,21 @@ function showExerciseDetail(exerciseId, exerciseName) {
         <div style="font-family:var(--sans);font-size:24px;font-weight:700;color:var(--accent)">${lastDisplay ? lastDisplay.value : '—'}</div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Zuletzt (${lastDisplay ? lastDisplay.unit : 'kg'})</div>
       </div>
+      ${bestE1 > 0 ? `
+      <div style="grid-column:1/-1;background:var(--bg3);border-radius:8px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <div>
+          <div style="font-size:13px;font-weight:600">Geschätztes 1RM</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Macht Sätze mit unterschiedlichen Wdh. vergleichbar</div>
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent)">${bestE1} kg</div>
+          ${lastE1 > 0 ? `<div style="font-size:12px;color:var(--muted)">zuletzt ${lastE1} kg</div>` : ''}
+        </div>
+      </div>` : ''}
+      ${stagnation ? `
+      <div style="grid-column:1/-1;background:color-mix(in srgb, var(--legs) 12%, transparent);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
+        <b>Seit ${stagnation.sessions} Einheiten kein Fortschritt.</b> Ideen: Wiederholungsbereich wechseln, die Übung für ein paar Wochen tauschen oder – wenn mehrere Übungen stagnieren – eine leichtere Woche einlegen.
+      </div>` : ''}
     </div>
 
     ${weights.length >= 2 ? `
@@ -4016,6 +4241,84 @@ const STATS_HISTORY_EMPTY = '<div style="font-family:var(--mono);font-size:13px;
 function updateStatsHistory() {
   const el = document.getElementById('stats-history');
   if (el) el.innerHTML = buildStatsHistoryHtml(getSessionKeys(true));
+}
+
+// ── SÄTZE PRO MUSKELGRUPPE ────────────────────────────────────
+// Erledigte Arbeitssätze (ohne Aufwärmsätze) je Muskelgruppe in einer
+// Kalenderwoche (Mo–So). weeksAgo: 0 = laufende Woche, 1 = Vorwoche.
+const MUSCLE_ORDER = ['brust', 'ruecken', 'schulter', 'bizeps', 'trizeps', 'beine', 'bauch'];
+
+function muscleSetsForWeek(weeksAgo) {
+  const start = new Date();
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) - 7 * weeksAgo);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  const from = localDateStr(start), to = localDateStr(end);
+
+  // Muskelfeld aus den Plänen (für Übungen, die nicht im Katalog stehen)
+  const allDays = Object.values(PLAN_DEFS).flatMap(p => p.days);
+  const planMuscle = {};
+  allDays.forEach(d => d.exercises.forEach(ex => { if (ex.id && !planMuscle[ex.id]) planMuscle[ex.id] = ex.muscle; }));
+
+  const counts = {};
+  getSessionKeys().forEach(k => {
+    const date = k.split(':')[2];
+    if (date < from || date >= to) return;
+    const raw = storageGet(k);
+    if (!raw) return;
+    const sets = raw.sets || raw;
+    let rows;
+    if (raw.meta) {
+      rows = Object.entries(raw.meta).map(([ei, m]) => ({ id: m.id, name: m.name, muscle: planMuscle[m.id], slot: sets[ei] }));
+    } else {
+      const day = allDays.find(d => d.id === k.split(':')[1]);
+      if (!day) return;
+      rows = day.exercises.map((ex, ei) => ({ id: raw.swappedIds?.[ei] || ex.id, name: raw.swapped?.[ei] || ex.name, muscle: ex.muscle, slot: sets[ei] }));
+    }
+    rows.forEach(r => {
+      if (!r.slot || r.slot.skipped) return;
+      const n = (r.slot.sets || []).filter(x => x && x.done).length;
+      if (!n) return;
+      const cat = muscleCategory(r.id, r.name, r.muscle) || 'sonstige';
+      counts[cat] = (counts[cat] || 0) + n;
+    });
+  });
+  return counts;
+}
+
+function muscleSetsCardHtml() {
+  const now = muscleSetsForWeek(0), prev = muscleSetsForWeek(1);
+  const cats = MUSCLE_ORDER.concat(now.sonstige || prev.sonstige ? ['sonstige'] : []);
+  if (!cats.some(c => now[c] || prev[c])) return '';
+  const max = Math.max(1, ...cats.map(c => Math.max(now[c] || 0, prev[c] || 0)));
+  const label = c => c === 'sonstige' ? 'Sonstige' : CATALOG[c].label;
+  return `<div style="background:var(--bg2);border-radius:10px;padding:14px;margin-bottom:12px;box-shadow:var(--card-shadow)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:600;color:var(--muted2)">Sätze pro Muskelgruppe · diese Woche</div>
+      <div style="font-size:12px;color:var(--muted2)">Vorwoche</div>
+    </div>
+    ${cats.map(c => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span style="font-size:13px;width:72px;flex-shrink:0">${label(c)}</span>
+        <div style="flex:1;background:var(--bg3);border-radius:4px;height:8px;overflow:hidden">
+          <div style="height:100%;width:${Math.round(((now[c] || 0) / max) * 100)}%;background:${MUSCLE_COLORS[c] || 'var(--muted2)'};border-radius:4px"></div>
+        </div>
+        <span style="font-size:14px;font-weight:600;width:22px;text-align:right">${now[c] || 0}</span>
+        <span style="font-size:12px;color:var(--muted2);width:26px;text-align:right">${prev[c] || 0}</span>
+      </div>`).join('')}
+  </div>`;
+}
+
+// Übungen des aktiven Plans, die seit 3 Einheiten nicht vorankommen
+function stagnatingExercises() {
+  const seen = new Set(), out = [];
+  DAYS.forEach(day => day.exercises.forEach(ex => {
+    const id = ex.id || slugify(ex.name);
+    if (seen.has(id)) return;
+    seen.add(id);
+    if (getStagnation(id, ex.name)) out.push(ex.name);
+  }));
+  return out;
 }
 
 // Verlaufslinie fürs Körpergewicht – gemeinsam für Start- und Statistikseite.
@@ -4204,6 +4507,9 @@ function renderStatsInner() {
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Übungen</div>
       </div>
     </div>
+
+    <!-- SÄTZE PRO MUSKELGRUPPE -->
+    ${muscleSetsCardHtml()}
 
     <!-- EINHEITEN PRO TAG -->
     ${(() => {
@@ -4552,6 +4858,18 @@ function renderHomeInner() {
 
     ${lastSessionHtml}
 
+    ${(() => {
+      const stuck = stagnatingExercises();
+      if (!stuck.length) return '';
+      return `<div class="home-card" style="background:color-mix(in srgb, var(--legs) 10%, var(--bg2))">
+        <div class="home-card-title" style="color:var(--legs)">⚠ Kein Fortschritt seit 3 Einheiten</div>
+        ${stuck.slice(0, 5).map(n => `<div style="font-size:14px;padding:3px 0">${esc(n)}</div>`).join('')}
+        <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.5">${stuck.length >= 3
+          ? 'Mehrere Übungen stagnieren gleichzeitig – oft ein Zeichen für Ermüdung. Eine leichtere Woche (weniger Sätze, etwas weniger Gewicht) kann helfen.'
+          : 'Ideen: Wiederholungsbereich wechseln oder die Übung für ein paar Wochen tauschen.'}</div>
+      </div>`;
+    })()}
+
     ${topPRs.length ? `
     <div class="home-card">
       <div class="home-card-title">🏆 Bestleistungen</div>
@@ -4688,11 +5006,92 @@ function saveBW() {
 }
 // ─────────────────────────────────────────────────────────────
 
-function toggleTimerEnabled() {
-  timerEnabled = !timerEnabled;
-  localStorage.setItem('gymbook:timerEnabled', String(timerEnabled));
+// ── PAUSENTIMER-EINSTELLUNGEN ─────────────────────────────────
+// Eine Web-App kann am iPhone weder im Hintergrund klingeln noch in der
+// Dynamic Island erscheinen. Der Umweg: Nach dem Abhaken startet die App
+// einen Kurzbefehl, der einen echten iPhone-Timer (Uhr-App) stellt – der
+// läuft sichtbar oben weiter, auch in TikTok oder Musik, und klingelt.
+// Einstellungen nur lokal ("gymbook_" → kein Export, kein Upload).
+const TIMER_SHORTCUT_STORE = 'gymbook_timerShortcut';   // Name des Kurzbefehls, '' = aus
+const TIMER_SOUND_STORE = 'gymbook_timerSound';         // 'off' = kein Ton
+function lsGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch(e) { return d; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(e) {} }
+
+function getTimerShortcut() { return lsGet(TIMER_SHORTCUT_STORE, ''); }
+function timerSoundOn() { return lsGet(TIMER_SOUND_STORE, 'on') !== 'off'; }
+
+function updateTimerLabel() {
   const el = document.getElementById('timer-toggle-label');
-  if (el) el.textContent = timerEnabled ? 'Pausentimer: An' : 'Pausentimer: Aus';
+  if (!el) return;
+  el.textContent = !timerEnabled ? 'Pausentimer: Aus'
+    : getTimerShortcut() ? 'Pausentimer: App + iPhone-Timer' : 'Pausentimer: In der App';
+}
+
+function openTimerSettings() {
+  const mode = !timerEnabled ? 'off' : getTimerShortcut() ? 'shortcut' : 'app';
+  const opt = (val, title, sub) => `
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;background:var(--bg3);border-radius:10px;margin-bottom:8px;cursor:pointer">
+      <input type="radio" name="timer-mode" value="${val}" ${mode === val ? 'checked' : ''} style="margin-top:3px">
+      <span><span style="font-weight:600">${title}</span><br><span style="font-size:13px;color:var(--muted)">${sub}</span></span>
+    </label>`;
+  document.getElementById('modal-content').innerHTML = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Pausentimer</h2>
+    ${opt('off', 'Aus', 'Kein Timer nach dem Abhaken.')}
+    ${opt('app', 'In der App', 'Timer läuft in GymBook. Nur sichtbar, solange die App offen ist.')}
+    ${opt('shortcut', 'App + iPhone-Timer', 'Startet zusätzlich über einen Kurzbefehl einen Timer der Uhr-App – sichtbar oben in der Dynamic Island, auch in anderen Apps, und er klingelt.')}
+    <div style="font-size:13px;color:var(--muted);margin:12px 0 6px">Name des Kurzbefehls</div>
+    <input type="text" id="timer-shortcut-name" value="${esc(getTimerShortcut() || 'GymBook Pause')}"
+      style="width:100%;background:var(--field);border:none;color:var(--text);font-size:16px;padding:11px 12px;border-radius:10px;box-sizing:border-box">
+    <label style="display:flex;gap:10px;align-items:center;margin:14px 0 18px;cursor:pointer">
+      <input type="checkbox" id="timer-sound" ${timerSoundOn() ? 'checked' : ''}>
+      <span>Ton am Pausenende <span style="font-size:13px;color:var(--muted)">(nur bei offener App, nicht im Lautlos-Modus)</span></span>
+    </label>
+    <button onclick="saveTimerSettings()" style="width:100%;background:var(--accent);color:var(--on-accent);border:none;font-size:15px;font-weight:600;padding:14px;border-radius:12px;cursor:pointer">Speichern</button>
+  `;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function saveTimerSettings() {
+  const mode = document.querySelector('input[name="timer-mode"]:checked')?.value || 'app';
+  const name = (document.getElementById('timer-shortcut-name')?.value || '').trim() || 'GymBook Pause';
+  timerEnabled = mode !== 'off';
+  lsSet('gymbook:timerEnabled', String(timerEnabled));
+  lsSet(TIMER_SHORTCUT_STORE, mode === 'shortcut' ? name : '');
+  lsSet(TIMER_SOUND_STORE, document.getElementById('timer-sound')?.checked ? 'on' : 'off');
+  updateTimerLabel();
+  closeModal();
+}
+
+// Startet den Kurzbefehl mit der Pausenlänge in Sekunden als Eingabe.
+// Muss direkt im Tipp-Ereignis passieren, sonst blockiert iOS den Wechsel.
+function runTimerShortcut(seconds) {
+  const name = getTimerShortcut();
+  if (!name) return;
+  location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(name)}&input=text&text=${Math.round(seconds)}`;
+}
+
+// Kurzer Signalton über Web Audio – navigator.vibrate gibt es am iPhone nicht.
+// Der AudioContext muss einmal durch eine Berührung freigeschaltet werden.
+let audioCtx = null;
+function unlockAudio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch(e) {}
+}
+function playTimerBeep() {
+  if (!audioCtx || !timerSoundOn()) return;
+  const t = audioCtx.currentTime;
+  [0, 0.25, 0.5].forEach(d => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, t + d);
+    g.gain.exponentialRampToValueAtTime(0.4, t + d + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.18);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t + d); o.stop(t + d + 0.2);
+  });
 }
 
 function toggleMenu() {
@@ -4785,27 +5184,20 @@ function adjustTimer(delta) {
   updateTimerDisplay();
 }
 
-// ── OFFLINE-HINWEIS ────────────────────────────────────────────
-// Kein Service Worker mehr (war über Blob-URL registriert und dadurch
-// unzuverlässig – konnte die App nach Updates komplett blockieren).
-// Die bereits vorhandene Offline-Warteschlange (siehe cloudPush) reicht
-// für kurze Verbindungsaussetzer im Gym völlig aus.
-//
-// Aktive Bereinigung: falls von einer älteren Version noch ein Service
-// Worker aktiv ist, wird er hier automatisch entfernt, damit er nicht
-// weiter alte Inhalte ausliefern kann.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(reg => reg.unregister());
-  }).catch(() => {});
-}
-if ('caches' in window) {
-  caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
+// ── OFFLINE-START ──────────────────────────────────────────────
+// sw.js (eigene Datei neben dieser Seite) hält eine Kopie der App vor, damit
+// sie auch ohne Netz startet. "Netz zuerst" – Updates sind sofort aktiv.
+// Der frühere Service Worker lief über eine Blob-URL und konnte die App nach
+// Updates blockieren; die neue Registrierung ersetzt ihn automatisch, und
+// sw.js räumt dessen alte Caches beim Aktivieren weg.
+// Fehlt sw.js auf dem Server, passiert einfach nichts.
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service Worker nicht registriert:', e));
 }
 // ─────────────────────────────────────────────────────────────
 
 // Init
-document.getElementById('timer-toggle-label').textContent = `Pausentimer: ${timerEnabled ? 'An' : 'Aus'}`;
+updateTimerLabel();
 renderNav();
 switchTab('home');
 cloudInit();
