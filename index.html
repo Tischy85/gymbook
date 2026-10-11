@@ -975,7 +975,7 @@ async function cloudInit() {
 async function cloudPull() {
   if (!getJsonbinKey()) { setStatus('Cloud nicht eingerichtet – nur lokal', false); return; }
   try {
-    const res = await fetch(`${JSONBIN_API}/${binId}/latest`, {
+    const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}/latest`, {
       headers: jsonbinAuthHeaders()
     });
     if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
@@ -1023,6 +1023,16 @@ async function cloudPull() {
 
 let offlineQueue = [];
 
+// fetch hat kein eingebautes Zeitlimit – bei schlechtem Empfang im Gym blieb
+// die App sonst minutenlang auf "Synchronisiere…" stehen. Nach Ablauf wird
+// die Anfrage abgebrochen und landet im normalen Offline-Zweig (catch).
+const CLOUD_TIMEOUT_MS = 15000;
+function fetchWithTimeout(url, opts) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), CLOUD_TIMEOUT_MS);
+  return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
+}
+
 // Laufende Ladevorgänge bündeln, damit Start und Push nicht doppelt laden
 let cloudPullInFlight = null;
 function cloudPullOnce() {
@@ -1031,7 +1041,10 @@ function cloudPullOnce() {
 }
 
 async function cloudPush() {
-  if (!binId || !getJsonbinKey()) return false;
+  if (!binId || !getJsonbinKey()) {
+    setStatus('⚠ Kein Cloud-Schlüssel auf diesem Gerät – nur lokal gesichert', false);
+    return false;
+  }
   // SCHUTZ VOR DATENVERLUST: Der Upload ersetzt den kompletten Cloud-Stand.
   // Wurde die Cloud noch nicht geladen (App offline gestartet, Ladefehler),
   // enthält cloudData nur die Änderungen dieser Sitzung – ein Upload würde
@@ -1049,7 +1062,7 @@ async function cloudPush() {
   const payload = JSON.stringify({ gymbook: compactForCloud(cloudData) });
   lastCloudSize = payload.length;
   try {
-    const res = await fetch(`${JSONBIN_API}/${binId}`, {
+    const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...jsonbinAuthHeaders() },
       body: payload
