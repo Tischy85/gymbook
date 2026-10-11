@@ -1023,8 +1023,29 @@ async function cloudPull() {
 
 let offlineQueue = [];
 
+// Laufende Ladevorgänge bündeln, damit Start und Push nicht doppelt laden
+let cloudPullInFlight = null;
+function cloudPullOnce() {
+  if (!cloudPullInFlight) cloudPullInFlight = cloudPull().finally(() => { cloudPullInFlight = null; });
+  return cloudPullInFlight;
+}
+
 async function cloudPush() {
   if (!binId || !getJsonbinKey()) return false;
+  // SCHUTZ VOR DATENVERLUST: Der Upload ersetzt den kompletten Cloud-Stand.
+  // Wurde die Cloud noch nicht geladen (App offline gestartet, Ladefehler),
+  // enthält cloudData nur die Änderungen dieser Sitzung – ein Upload würde
+  // die gesamte Historie in der Cloud überschreiben. Deshalb erst laden;
+  // klappt das nicht, wird NICHT hochgeladen. Die Änderungen bleiben lokal
+  // in der Sicherheitsliste (gymbook:pending) und werden beim nächsten
+  // erfolgreichen Laden automatisch übernommen.
+  if (!cloudLoaded) {
+    await cloudPullOnce();
+    if (!cloudLoaded) {
+      setStatus('⚠ Cloud nicht erreichbar – nur lokal gesichert', false);
+      return false;
+    }
+  }
   const payload = JSON.stringify({ gymbook: compactForCloud(cloudData) });
   lastCloudSize = payload.length;
   try {
@@ -1063,11 +1084,18 @@ async function cloudPush() {
 }
 
 // Retry queue when connection returns
+// War die App offline gestartet, wird jetzt zuerst der Cloud-Stand geladen
+// (cloudPull übernimmt dabei ausstehende lokale Änderungen und plant den
+// Upload selbst ein). Statusmeldung nur bei echtem Erfolg.
 window.addEventListener('online', async () => {
+  if (!getJsonbinKey()) return;
+  setStatus('☁ Synchronisiere…', false);
+  if (!cloudLoaded) { await cloudPullOnce(); return; }
   const saved = localStorage.getItem('gymbook:offlinequeue');
-  if (saved) {
-    setStatus('☁ Synchronisiere…', false);
-    await cloudPush();
+  if (saved || getPendingCount()) {
+    const ok = await cloudPush();
+    if (ok) setStatus('☁ Synchronisiert', true);
+  } else {
     setStatus('☁ Synchronisiert', true);
   }
 });
