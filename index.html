@@ -981,6 +981,7 @@ function saveCloudKey() {
 function removeCloudKey() {
   try { localStorage.removeItem(JSONBIN_KEY_STORE); } catch(e) {}
   cloudLoaded = false;
+  invalidateExerciseIndex();   // Daten kommen ab jetzt aus dem lokalen Speicher
   closeModal();
   setStatus('Cloud getrennt – nur lokal gespeichert', false);
 }
@@ -1008,6 +1009,7 @@ async function cloudPull() {
     const receivedSize = JSON.stringify(cloudData).length;
     decodeCloudData(cloudData);          // kompakte Cloud-Schreibweise → normale Form
     cloudLoaded = true;
+    invalidateExerciseIndex();           // komplett neuer Datenstand
 
     // Änderungen, die es vor dem letzten Schließen nicht mehr in die Cloud
     // geschafft haben, aus dem lokalen Speicher zurückholen – sonst würde
@@ -1055,6 +1057,7 @@ let offlineQueue = [];
 // die App sonst minutenlang auf "Synchronisiere…" stehen. Nach Ablauf wird
 // die Anfrage abgebrochen und landet im normalen Offline-Zweig (catch).
 const CLOUD_TIMEOUT_MS = 15000;
+const KEEPALIVE_LIMIT = 60000;   // knapp unter der 64-KB-Grenze für keepalive
 function fetchWithTimeout(url, opts) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), CLOUD_TIMEOUT_MS);
@@ -1068,7 +1071,8 @@ function cloudPullOnce() {
   return cloudPullInFlight;
 }
 
-async function cloudPush() {
+// opts.closing: Aufruf beim Schließen/Wegwischen der App (siehe flushPush)
+async function cloudPush(opts = {}) {
   if (!binId || !getJsonbinKey()) {
     setStatus('⚠ Kein Cloud-Schlüssel auf diesem Gerät – nur lokal gesichert', false);
     return false;
@@ -1081,6 +1085,9 @@ async function cloudPush() {
   // in der Sicherheitsliste (gymbook:pending) und werden beim nächsten
   // erfolgreichen Laden automatisch übernommen.
   if (!cloudLoaded) {
+    // Beim Schließen bleibt keine Zeit, erst zu laden – dann lieber nichts
+    // senden. Die Änderungen liegen sicher in der Sicherheitsliste.
+    if (opts.closing) return false;
     await cloudPullOnce();
     if (!cloudLoaded) {
       setStatus('⚠ Cloud nicht erreichbar – nur lokal gesichert', false);
@@ -1093,7 +1100,12 @@ async function cloudPush() {
     const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...jsonbinAuthHeaders() },
-      body: payload
+      body: payload,
+      // keepalive: Der Browser schickt die Anfrage zu Ende, auch wenn die App
+      // gerade geschlossen wird – sonst bricht iOS sie meist ab. Erlaubt sind
+      // nur bis 64 KB; bei größeren Daten normal senden (klappt das nicht,
+      // holt die Sicherheitsliste es beim nächsten Öffnen nach).
+      keepalive: !!opts.closing && payload.length < KEEPALIVE_LIMIT
     });
     // fetch meldet nur Netzwerkausfälle als Fehler, NICHT wenn der Server
     // ablehnt (Datei zu groß, Anfragen aufgebraucht, Schlüssel ungültig).
@@ -1198,6 +1210,7 @@ function storageSet(key, val) {
   if (del.includes(key)) {
     try { localStorage.setItem(DELETED_KEYS_STORE, JSON.stringify(del.filter(k => k !== key))); } catch(e) {}
   }
+  invalidateExerciseIndex();
   cloudData[key] = val;
   localStorage.setItem(key, JSON.stringify(val));   // sofort lokal sichern
   markPendingKey(key);                              // für den Fall eines Absturzes
@@ -1380,7 +1393,7 @@ function flushPush() {
   if (cloudPushTimer) {
     clearTimeout(cloudPushTimer);
     cloudPushTimer = null;
-    cloudPush();
+    cloudPush({ closing: true });
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushPush(); });
@@ -1586,71 +1599,81 @@ function bestSetValue(sets) {
   return reps.length ? { value: Math.max(...reps), unit: 'Wdh.' } : null;
 }
 
-function getLastEntryById(exerciseId, exerciseName) {
-  const date = activeDateStr();
-  const allKeys = sortByDate(getSessionKeys().filter(k => !k.endsWith(date)), true);
+// ── ÜBUNGS-INDEX ──────────────────────────────────────────────
+// Vorher ging jede Abfrage (letzte Einheit, Bestleistung, Verlauf) ALLE
+// Einheiten durch und sortierte sie neu – im Übungen-Tab für jede der rund
+// 80 Übungen zweimal, und das bei jedem Buchstaben in der Suche. Jetzt wird
+// einmal ein Verzeichnis "Übung → ihre Einträge, neueste zuerst" gebaut und
+// erst neu erstellt, wenn sich Daten ändern (invalidateExerciseIndex).
+//   byId:   Einheiten mit meta (Übungs-ID gespeichert, plan-unabhängig)
+//   byName: Altbestand ohne meta – über Namen + aktuellen Plan (DAYS)
+let exerciseIndex = null;
+function invalidateExerciseIndex() { exerciseIndex = null; }
 
-  for (const k of allKeys) {
-    const raw = storageGet(k);
-    if (!raw) continue;
+function getExerciseIndex() {
+  // DAYS-Wechsel (anderer Plan) betrifft die Zuordnung des Altbestands
+  if (exerciseIndex && exerciseIndex.days === DAYS) return exerciseIndex;
+  const byId = {}, byName = {};
+  const add = (map, k, entry) => { (map[k] = map[k] || []).push(entry); };
+  sortByDate(getSessionKeys(), true).forEach(key => {
+    const raw = storageGet(key);
+    if (!raw) return;
     const sets = raw.sets || raw;
-    const metaMap = raw.meta || null;
-
-    if (metaMap) {
-      // Neue Struktur: direkte ID-Zuordnung, komplett plan-unabhängig
-      for (const ei in metaMap) {
-        if (metaMap[ei].id === exerciseId && hasLoggedData(sets[ei]?.sets)) {
-          return sets[ei].sets;
-        }
+    const date = key.split(':')[2];
+    if (raw.meta) {
+      for (const ei in raw.meta) {
+        if (Array.isArray(sets[ei]?.sets)) add(byId, raw.meta[ei].id, { key, date, sets: sets[ei].sets });
       }
     } else {
-      // Legacy: kein meta-Feld gespeichert – über Namen + aktuellen DAYS-Stand suchen
-      const dayId = k.split(':')[1];
-      const day = DAYS.find(d => d.id === dayId);
-      if (!day) continue;
+      const day = DAYS.find(d => d.id === key.split(':')[1]);
+      if (!day) return;
       const swapped = raw.swapped || {};
-      for (let ei = 0; ei < day.exercises.length; ei++) {
-        const slotName = swapped[ei] || day.exercises[ei].name;
-        if (slotName === exerciseName && hasLoggedData(sets[ei]?.sets)) {
-          return sets[ei].sets;
-        }
-      }
+      day.exercises.forEach((ex, ei) => {
+        if (Array.isArray(sets[ei]?.sets)) add(byName, swapped[ei] || ex.name, { key, date, sets: sets[ei].sets });
+      });
     }
+  });
+  exerciseIndex = { days: DAYS, byId, byName, merged: {} };
+  return exerciseIndex;
+}
+
+// Alle Einträge einer Übung (ID-Treffer + Altbestand per Name), neueste zuerst
+function getExerciseEntries(exerciseId, exerciseName) {
+  const idx = getExerciseIndex();
+  const cacheKey = exerciseId + '\u0001' + exerciseName;
+  if (!idx.merged[cacheKey]) {
+    const list = (idx.byId[exerciseId] || []).concat(idx.byName[exerciseName] || []);
+    idx.merged[cacheKey] = list.sort((a, b) => b.date.localeCompare(a.date));
   }
-  return null;
+  return idx.merged[cacheKey];
+}
+
+// Die letzten `count` Einheiten mit echten Einträgen, ohne das aktive Datum
+// (je Einheit nur der erste passende Slot)
+function getLastEntriesById(exerciseId, exerciseName, count) {
+  const date = activeDateStr();
+  const results = [], seen = new Set();
+  for (const e of getExerciseEntries(exerciseId, exerciseName)) {
+    if (results.length >= count) break;
+    if (e.date === date || seen.has(e.key) || !hasLoggedData(e.sets)) continue;
+    seen.add(e.key);
+    results.push(e.sets);
+  }
+  return results;
+}
+
+function getLastEntryById(exerciseId, exerciseName) {
+  return getLastEntriesById(exerciseId, exerciseName, 1)[0] || null;
 }
 
 // excludeKey: diese Einheit nicht mitzählen. Für die Rekord-Meldung nötig –
 // die laufende Einheit ist beim Abhaken schon gespeichert, ohne Ausschluss
 // wurde das neue Gewicht mit sich selbst verglichen und war nie größer.
 function getPersonalRecordById(exerciseId, exerciseName, excludeKey) {
-  const allKeys = getSessionKeys().filter(k => k !== excludeKey);
   let best = 0;
-  allKeys.forEach(k => {
-    const raw = storageGet(k);
-    if (!raw) return;
-    const sets = raw.sets || raw;
-    const metaMap = raw.meta || null;
-
-    if (metaMap) {
-      for (const ei in metaMap) {
-        if (metaMap[ei].id !== exerciseId) continue;
-        const exSets = sets[ei]?.sets || [];
-        exSets.forEach(s => { const w = parseFloat(s.weight); if (!isNaN(w) && w > best) best = w; });
-      }
-    } else {
-      // Legacy fallback über Namen
-      const dayId = k.split(':')[1];
-      const day = DAYS.find(d => d.id === dayId);
-      if (!day) return;
-      const swapped = raw.swapped || {};
-      day.exercises.forEach((ex, ei) => {
-        const name = swapped[ei] || ex.name;
-        if (name !== exerciseName) return;
-        const exSets = sets[ei]?.sets || [];
-        exSets.forEach(s => { const w = parseFloat(s.weight); if (!isNaN(w) && w > best) best = w; });
-      });
-    }
+  getExerciseEntries(exerciseId, exerciseName).forEach(e => {
+    if (e.key === excludeKey) return;
+    e.sets.forEach(s => { const w = parseFloat(s?.weight); if (!isNaN(w) && w > best) best = w; });
   });
   return best;
 }
@@ -2145,6 +2168,7 @@ function discardPlanEdits() {
   editOrigRefs = null;
   editDraft = null;
   editMode = false;
+  invalidateExerciseIndex();   // Übungsnamen sind wieder die alten
   const btn = document.getElementById('edit-plan-btn');
   if (btn) { btn.classList.remove('active'); btn.textContent = '✏ Plan'; }
 }
@@ -3156,42 +3180,6 @@ function parseRepRange(repsStr) {
   return { low: single, high: single };
 }
 
-function getLastEntriesById(exerciseId, exerciseName, count) {
-  const date = activeDateStr();
-  const allKeys = sortByDate(getSessionKeys().filter(k => !k.endsWith(date)), true);
-
-  const results = [];
-  for (const k of allKeys) {
-    if (results.length >= count) break;
-    const raw = storageGet(k);
-    if (!raw) continue;
-    const sets = raw.sets || raw;
-    const metaMap = raw.meta || null;
-
-    if (metaMap) {
-      for (const ei in metaMap) {
-        if (metaMap[ei].id === exerciseId && hasLoggedData(sets[ei]?.sets)) {
-          results.push(sets[ei].sets);
-          break;
-        }
-      }
-    } else {
-      const dayId = k.split(':')[1];
-      const day = DAYS.find(d => d.id === dayId);
-      if (!day) continue;
-      const swapped = raw.swapped || {};
-      for (let ei = 0; ei < day.exercises.length; ei++) {
-        const slotName = swapped[ei] || day.exercises[ei].name;
-        if (slotName === exerciseName && hasLoggedData(sets[ei]?.sets)) {
-          results.push(sets[ei].sets);
-          break;
-        }
-      }
-    }
-  }
-  return results;
-}
-
 function calcWeightSuggestion(lastSets, repsTarget, step, exerciseId, exerciseName) {
   const logged = loggedSets(lastSets).filter(s => s.weight && s.reps);
   if (!logged.length) return null;
@@ -3529,6 +3517,7 @@ function deleteSession() {
     try { localStorage.removeItem(k); } catch(e) {}
   });
   markDeletedKeys(keys);
+  invalidateExerciseIndex();
   cloudPush();
   loadSessionData();
   renderDay();
@@ -3748,18 +3737,40 @@ function exportData() {
     return;
   }
   const json = JSON.stringify({ version: 1, exported: todayStr(), data: allData }, null, 2);
-  const blob = new Blob([json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+  const filename = `gymbook-backup-${todayStr()}.json`;
+
+  const done = () => {
+    try { localStorage.setItem('gymbook_lastBackup', String(Date.now())); } catch (e) {}
+    setStatus(`Export gespeichert — ${formatDate(todayStr())}`, true);
+    if (currentTab === 'home') renderHome();     // Backup-Erinnerung ausblenden
+  };
+
+  // Am iPhone (vor allem als Homescreen-App) landet ein Download-Link oft im
+  // Nichts. Dort stattdessen das Teilen-Menü öffnen – "In Dateien sichern",
+  // AirDrop, Mail … Am Rechner bleibt es beim normalen Download.
+  const file = new File([json], filename, { type: 'application/json' });
+  const isTouch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  if (isTouch && navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: 'GymBook-Backup' })
+      .then(done)
+      .catch(err => {
+        // Abbrechen im Teilen-Menü ist kein Fehler – nur nicht als Backup zählen
+        if (err && err.name !== 'AbortError') setStatus('⚠ Export fehlgeschlagen', false);
+      });
+    return;
+  }
+
+  const url = URL.createObjectURL(file);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `gymbook-backup-${todayStr()}.json`;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  try { localStorage.setItem('gymbook_lastBackup', String(Date.now())); } catch (e) {}
-  URL.revokeObjectURL(url);
-  const el = document.getElementById('save-status');
-  el.textContent = `Export gespeichert — ${formatDate(todayStr())}`;
-  el.className = 'save-status saved';
-  setTimeout(() => { el.textContent = 'Alle Änderungen gespeichert'; }, 3000);
+  a.remove();
+  // Erst später freigeben: Sofortiges Freigeben brach den Download in
+  // manchen Browsern (u. a. Safari) ab, bevor er überhaupt begonnen hatte.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  done();
 }
 
 function importData(event) {
