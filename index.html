@@ -557,23 +557,6 @@
   </div>
 </div>
 
-<!-- Dropdown Menu -->
-<div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
-  <button class="menu-item" onclick="switchTab('stats');toggleMenu()"><span class="menu-item-icon">📊</span>Statistiken</button>
-  <div class="menu-divider"></div>
-  <button class="menu-item" onclick="toggleMenu();syncNow()"><span class="menu-item-icon">☁</span><span id="menu-sync-label">Jetzt synchronisieren</span></button>
-  <button class="menu-item" onclick="toggleMenu();openCloudKeyModal()"><span class="menu-item-icon">🔑</span>Cloud-Schlüssel</button>
-  <div class="menu-storage" id="menu-storage"></div>
-  <div class="menu-divider"></div>
-  <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
-  <div class="menu-divider"></div>
-  <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
-  <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
-  <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
-  <div class="menu-divider" id="menu-delete-divider" style="display:none"></div>
-  <button class="menu-item menu-item-danger" id="menu-delete-session" style="display:none" onclick="toggleMenu();deleteSession()"><span class="menu-item-icon">🗑</span><span id="menu-delete-label">Einheit löschen</span></button>
-</div>
-
 <div class="plan-switcher" id="plan-switcher"></div>
 <div class="nav" id="day-nav"></div>
 <div class="main" id="main-content"></div>
@@ -589,6 +572,24 @@
 </div>
 
 </div><!-- end training-page -->
+
+<!-- Dropdown Menu – bewusst AUSSERHALB der Training-Seite, sonst ist es auf
+     Home/Übungen/Statistiken mit der Training-Seite zusammen unsichtbar -->
+<div class="menu-dropdown" id="menu-dropdown" style="display:none;position:fixed;top:70px;right:20px">
+  <button class="menu-item" onclick="switchTab('stats');toggleMenu()"><span class="menu-item-icon">📊</span>Statistiken</button>
+  <div class="menu-divider"></div>
+  <button class="menu-item" onclick="toggleMenu();syncNow()"><span class="menu-item-icon">☁</span><span id="menu-sync-label">Jetzt synchronisieren</span></button>
+  <button class="menu-item" onclick="toggleMenu();openCloudKeyModal()"><span class="menu-item-icon">🔑</span>Cloud-Schlüssel</button>
+  <div class="menu-storage" id="menu-storage"></div>
+  <div class="menu-divider"></div>
+  <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
+  <div class="menu-divider"></div>
+  <button class="menu-item" onclick="exportData();toggleMenu()"><span class="menu-item-icon">↓</span>Export (JSON)</button>
+  <button class="menu-item" onclick="exportSummary();toggleMenu()"><span class="menu-item-icon">📤</span>Einheit teilen</button>
+  <label class="menu-item" style="cursor:pointer"><span class="menu-item-icon">↑</span>Import<input type="file" accept=".json" onchange="importData(event);toggleMenu()" style="display:none"></label>
+  <div class="menu-divider" id="menu-delete-divider" style="display:none"></div>
+  <button class="menu-item menu-item-danger" id="menu-delete-session" style="display:none" onclick="toggleMenu();deleteSession()"><span class="menu-item-icon">🗑</span><span id="menu-delete-label">Einheit löschen</span></button>
+</div>
 
 <!-- STATS PAGE -->
 <div id="stats-page" style="display:none">
