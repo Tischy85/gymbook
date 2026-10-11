@@ -1007,6 +1007,10 @@ async function cloudPull() {
         if (raw === null) return;
         try { cloudData[k] = JSON.parse(raw); restored++; } catch(e) {}
       });
+      // Offline gelöschte Einträge auch im frisch geladenen Stand löschen
+      getDeletedKeys().forEach(k => {
+        if (k in cloudData) { delete cloudData[k]; restored++; }
+      });
       if (restored) { schedulePush(); }
     } catch(e) {}
     loadUserPlans();
@@ -1093,6 +1097,7 @@ async function cloudPush() {
       return false;                     // Sicherheitsliste bleibt erhalten
     }
     clearPendingKeys();
+    clearDeletedKeys();                 // Löschungen sind jetzt in der Cloud
     if (offlineQueue.length > 0) {
       offlineQueue = [];
       localStorage.removeItem('gymbook:offlinequeue');
@@ -1144,6 +1149,28 @@ function clearPendingKeys() {
   try { localStorage.removeItem('gymbook:pending'); } catch(e) {}
 }
 
+// Gelöschte Schlüssel, deren Löschung noch nicht in der Cloud angekommen
+// ist. Nur lokal ("gymbook_"-Präfix → weder Export noch Upload). Werden nach
+// jedem Laden aus der Cloud erneut angewendet und nach erfolgreichem Upload
+// geleert.
+const DELETED_KEYS_STORE = 'gymbook_deletedKeys';
+function getDeletedKeys() {
+  try { return JSON.parse(localStorage.getItem(DELETED_KEYS_STORE) || '[]'); } catch(e) { return []; }
+}
+function markDeletedKeys(keys) {
+  try {
+    const del = getDeletedKeys();
+    keys.forEach(k => { if (!del.includes(k)) del.push(k); });
+    localStorage.setItem(DELETED_KEYS_STORE, JSON.stringify(del));
+    // Aus der Sicherheitsliste nehmen – dort hätten sie nichts mehr verloren
+    const pend = JSON.parse(localStorage.getItem('gymbook:pending') || '[]').filter(k => !keys.includes(k));
+    localStorage.setItem('gymbook:pending', JSON.stringify(pend));
+  } catch(e) {}
+}
+function clearDeletedKeys() {
+  try { localStorage.removeItem(DELETED_KEYS_STORE); } catch(e) {}
+}
+
 // Trainingsdaten (Sätze, Notizen) gehen erst beim "Training beenden" in die
 // Cloud – während der Einheit nur lokal. Alles andere (Pläne, Katalog,
 // Körpergewicht, Einstellungen) wird wie bisher gebündelt übertragen.
@@ -1152,6 +1179,12 @@ function isDeferredKey(key) {
 }
 
 function storageSet(key, val) {
+  // Wird ein zuvor gelöschter Eintrag neu angelegt (Einheit gelöscht, dann
+  // am selben Tag neu begonnen), darf die alte Löschung ihn nicht erwischen.
+  const del = getDeletedKeys();
+  if (del.includes(key)) {
+    try { localStorage.setItem(DELETED_KEYS_STORE, JSON.stringify(del.filter(k => k !== key))); } catch(e) {}
+  }
   cloudData[key] = val;
   localStorage.setItem(key, JSON.stringify(val));   // sofort lokal sichern
   markPendingKey(key);                              // für den Fall eines Absturzes
@@ -1453,6 +1486,14 @@ function saveSession() {
   const prev = storageGet(getKey(day.id, date)) || {};
   const startedAt = prev.startedAt || (sessionStartTime || Date.now());
 
+  // Altbestand bereinigen: Einheiten, in denen früher Sätze nur ausgeblendet
+  // statt entfernt wurden, beim nächsten Speichern auf die echte Satzzahl kürzen.
+  Object.values(sessionData).forEach(slot => {
+    if (slot && slot.activeSets != null && Array.isArray(slot.sets) && slot.sets.length > slot.activeSets) {
+      slot.sets.length = slot.activeSets;
+    }
+  });
+
   storageSet(getKey(day.id, date), {
     sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds,
     meta: slotMeta, startedAt,
@@ -1704,6 +1745,7 @@ function adjustWeight(ei, s, delta) {
 }
 
 function adjustSets(ei, delta) {
+  collectInputValues();   // gerade getippte Werte berücksichtigen
   const ex = DAYS[currentDay].exercises[ei];
   if (!sessionData[ei]) sessionData[ei] = { sets: [], activeSets: ex.sets };
   const current = sessionData[ei].activeSets != null ? sessionData[ei].activeSets : ex.sets;
@@ -1713,6 +1755,13 @@ function adjustSets(ei, delta) {
   } else {
     next = Math.max(1, Math.min(current + delta, 8));
   }
+  // Wegfallende Sätze wirklich entfernen. Vorher blieben sie unsichtbar im
+  // Array und zählten weiter für Rekorde, Verlauf, Volumen und Satzanzahl.
+  const dropped = sessionData[ei].sets.slice(next);
+  if (dropped.some(st => st && (st.weight || st.reps || st.done))) {
+    if (!confirm(`Der entfernte Satz enthält Einträge. Trotzdem entfernen?`)) return;
+  }
+  sessionData[ei].sets.length = Math.min(sessionData[ei].sets.length, next);
   sessionData[ei].activeSets = next;
   // Pad sets array if needed
   while (sessionData[ei].sets.length < next) {
@@ -2041,11 +2090,58 @@ let catalogEditMode = false;
 // und wurde beim nächsten Speichern still mitgeschrieben.
 let editSnapshot = null;
 
+// Ursprüngliche Übungs-OBJEKTE je Tag (keine Kopien). Umsortieren und Löschen
+// verschieben dieselben Objekte, Tauschen ändert sie an Ort und Stelle – so
+// lässt sich beim Speichern für jede neue Position die alte bestimmen.
+let editOrigRefs = null;
+
+// Die Sätze einer Einheit hängen am Index der Übung. Nach Umsortieren oder
+// Löschen im Plan landeten bereits eingetragene Sätze der gewählten Einheit
+// sonst bei der falschen Übung. Hier wird die Einheit am aktiven Datum für
+// jeden geänderten Tag auf die neue Reihenfolge umgeschrieben.
+function getPlanEditRemaps() {
+  if (!editOrigRefs) return [];
+  const date = activeDateStr();
+  const remaps = [];
+  DAYS.forEach((day, di) => {
+    const orig = editOrigRefs[di] || [];
+    const newToOld = day.exercises.map(ex => orig.indexOf(ex));
+    const unchanged = newToOld.length === orig.length && newToOld.every((oi, ni) => oi === ni);
+    if (unchanged) return;
+    const key = getKey(day.id, date);
+    const raw = storageGet(key);
+    if (!raw || !raw.sets) return;
+    // Übungen, die gelöscht wurden, aber heute schon Einträge hatten
+    const lost = orig.map((ex, oi) => oi).filter(oi => !newToOld.includes(oi) && raw.sets[oi]
+      && (raw.sets[oi].skipped || loggedSets(raw.sets[oi].sets).length));
+    remaps.push({ key, raw, newToOld, lost: lost.length });
+  });
+  return remaps;
+}
+
+function applyPlanEditRemaps(remaps) {
+  remaps.forEach(({ key, raw, newToOld }) => {
+    const remap = obj => {
+      const out = {};
+      newToOld.forEach((oi, ni) => { if (oi >= 0 && obj && obj[oi] !== undefined) out[ni] = obj[oi]; });
+      return out;
+    };
+    storageSet(key, {
+      ...raw,
+      sets: remap(raw.sets),
+      swapped: remap(raw.swapped || {}),
+      swappedIds: remap(raw.swappedIds || {}),
+      meta: remap(raw.meta || {})
+    });
+  });
+}
+
 function discardPlanEdits() {
   if (editSnapshot) {
     editSnapshot.forEach((day, di) => { if (DAYS[di]) DAYS[di].exercises = day.exercises; });
   }
   editSnapshot = null;
+  editOrigRefs = null;
   editDraft = null;
   editMode = false;
   const btn = document.getElementById('edit-plan-btn');
@@ -2057,6 +2153,7 @@ function toggleEditMode() {
   if (!editMode) {
     editMode = true;
     editSnapshot = JSON.parse(JSON.stringify(DAYS));
+    editOrigRefs = DAYS.map(d => d.exercises.slice());
     editDraft = JSON.parse(JSON.stringify(DAYS));
     btn.classList.add('active');
     btn.textContent = '× Abbrechen';
@@ -2068,6 +2165,10 @@ function toggleEditMode() {
 
 async function saveCustomPlan() {
   if (!editDraft) return;
+  // Vor dem Speichern prüfen, ob dadurch heute eingetragene Sätze wegfallen
+  const remaps = getPlanEditRemaps();
+  const lostCount = remaps.reduce((n, r) => n + r.lost, 0);
+  if (lostCount && !confirm(`${lostCount} gelöschte Übung(en) haben in der Einheit vom ${formatDate(activeDateStr())} schon Einträge. Diese Einträge werden entfernt. Trotzdem speichern?`)) return;
   // Collect field values from DOM
   DAYS.forEach((day, di) => {
     day.exercises.forEach((ex, ei) => {
@@ -2096,9 +2197,11 @@ async function saveCustomPlan() {
 
   persistActivePlan();
   saveCustomCatalog();
+  applyPlanEditRemaps(remaps);   // Sätze der Einheit an die neue Reihenfolge anpassen
 
   // Exit edit mode cleanly – Änderungen gelten jetzt, kein Zurückstellen mehr
   editSnapshot = null;
+  editOrigRefs = null;
   editMode = false;
   editDraft = null;
   const btn = document.getElementById('edit-plan-btn');
@@ -3415,9 +3518,16 @@ function deleteSession() {
   const day = DAYS[currentDay];
   const date = activeDateStr();
   if (!confirm(`Einheit vom ${formatDate(date)} wirklich löschen?`)) return;
-  const key = getKey(day.id, date);
-  delete cloudData[key];
-  localStorage.removeItem(key);
+  // Einheit UND zugehörige Notiz löschen (die Notiz blieb vorher verwaist
+  // liegen). Die Schlüssel werden zusätzlich als "gelöscht" vorgemerkt:
+  // Klappt der Upload nicht sofort (offline), würde der nächste Abruf aus
+  // der Cloud sie sonst wiederherstellen.
+  const keys = [getKey(day.id, date), `gymbook:note:${day.id}:${date}`];
+  keys.forEach(k => {
+    delete cloudData[k];
+    try { localStorage.removeItem(k); } catch(e) {}
+  });
+  markDeletedKeys(keys);
   cloudPush();
   loadSessionData();
   renderDay();
@@ -4697,7 +4807,11 @@ function showFinishModal() {
   const date = activeDateStr();
 
   // Calculate stats
-  const duration = sessionStartTime ? Math.round((Date.now() - sessionStartTime) / 60000) : null;
+  // Gespeicherten Startzeitpunkt bevorzugen – sessionStartTime lebt nur im
+  // Arbeitsspeicher und beginnt nach einem Neustart der App von vorn.
+  // Dieselbe Quelle wie completeSession, damit Anzeige und Speicherung passen.
+  const startedAt = storageGet(getKey(day.id, date))?.startedAt || sessionStartTime;
+  const duration = startedAt ? Math.round((Date.now() - startedAt) / 60000) : null;
   let totalSetsCompleted = 0;
   let newPRs = [];
 
