@@ -897,6 +897,19 @@ function parseLocalDate(iso) {
 function todayStr() { return localDateStr(new Date()); }
 function activeDateStr() { return activeDate || todayStr(); }
 
+// Eigene Texte (Übungs-/Plannamen, Notizen, Gründe, Importdaten) dürfen nie
+// als HTML ausgewertet werden. Vorher brach z. B. ein " in einem Übungsnamen
+// die Knöpfe, und eine präparierte Importdatei hätte Skriptcode ausführen
+// können.
+// esc():   für Text und Attributwerte in innerHTML-Vorlagen
+// jsArg(): für Werte, die in onclick="…" als JS-Zeichenkette übergeben werden
+//          (inkl. Anführungszeichen – also OHNE eigene '…' drumherum einsetzen)
+function esc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function jsArg(v) { return esc(JSON.stringify(String(v ?? ''))); }
+
 function formatDate(iso) {
   const [y,m,d] = iso.split('-');
   return `${d}.${m}.${y}`;
@@ -1523,16 +1536,6 @@ function collectInputValues() {
   });
 }
 
-function getHistory(dayId) {
-  const keys = storageGetAllKeys().filter(k => k.startsWith(`gymbook:${dayId}:`));
-  return keys.map(k => {
-    const date = k.split(':')[2];
-    const raw = storageGet(k);
-    const data = raw?.sets || raw;
-    return { date, data };
-  }).sort((a,b) => b.date.localeCompare(a.date));
-}
-
 function getLastEntry(dayId, exIndex) {
   // Legacy fallback by index
   const date = activeDateStr();
@@ -1671,7 +1674,7 @@ function openSkipModal(ei) {
   const html = `
     <button class="modal-close" onclick="closeSkipModal()">×</button>
     <h2>Übung überspringen</h2>
-    <div style="font-family:var(--mono);font-size:13px;color:var(--muted);margin:8px 0 16px">${displayName}</div>
+    <div style="font-family:var(--mono);font-size:13px;color:var(--muted);margin:8px 0 16px">${esc(displayName)}</div>
     <div style="display:flex;flex-direction:column;gap:6px">
       ${SKIP_REASONS.map((r, i) => i < 4 ? `
         <button onclick="skipExercise(${ei}, '${r.icon} ${r.label}')" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:13px;padding:13px 16px;border-radius:8px;cursor:pointer;text-align:left;transition:all 0.15s;display:flex;align-items:center;gap:10px">
@@ -1933,11 +1936,10 @@ function renderCatalog() {
     const alreadyInDay = new Set(DAYS[di].exercises.map(e => e.id));
     const exercises = CATALOG[catalogActiveMuscle].exercises.map(exObj => {
       const name = exObj.name;
-      const safeName = name.replace(/'/g, "\\'");
       const already = alreadyInDay.has(exObj.id);
       return `
-        <div class="cat-ex-row ${already ? 'cat-ex-active' : ''}" onclick="${already ? '' : `appendCatalogExercise('${safeName}', '${exObj.id}')`}" style="${already ? 'opacity:0.4;cursor:default' : ''}">
-          <span class="cat-ex-name">${name}${already ? ' <span class="cat-active-badge">Bereits im Plan</span>' : ''}</span>
+        <div class="cat-ex-row ${already ? 'cat-ex-active' : ''}" onclick="${already ? '' : `appendCatalogExercise(${jsArg(name)}, ${jsArg(exObj.id)})`}" style="${already ? 'opacity:0.4;cursor:default' : ''}">
+          <span class="cat-ex-name">${esc(name)}${already ? ' <span class="cat-active-badge">Bereits im Plan</span>' : ''}</span>
           <span class="cat-ex-arrow">${already ? '✓' : '+'}</span>
         </div>
       `;
@@ -1973,20 +1975,19 @@ function renderCatalog() {
     const name = exObj.name;
     const isActive = swappedName === name;
     const isOriginal = ex.name === name;
-    const safeName = name.replace(/'/g, "\\'");
     const exId = exObj.id;
     if (catalogEditMode) {
       return `
         <div class="cat-ex-row ${isOriginal ? 'cat-ex-active' : ''}">
-          <span class="cat-ex-name" onclick="applySwap(${ei}, '${safeName}', '${exId}')" style="flex:1;cursor:pointer">${name}${isOriginal ? ' <span class="cat-active-badge">Aktuell</span>' : ''}</span>
-          <span class="cat-ex-arrow" onclick="applySwap(${ei}, '${safeName}', '${exId}')" style="cursor:pointer;margin-right:10px">${isOriginal ? '✓' : '→'}</span>
-          <button onclick="deleteFromCatalog('${safeName}', event)" style="background:none;border:none;color:var(--muted2);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:color 0.15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'">✕</button>
+          <span class="cat-ex-name" onclick="applySwap(${ei}, ${jsArg(name)}, ${jsArg(exId)})" style="flex:1;cursor:pointer">${esc(name)}${isOriginal ? ' <span class="cat-active-badge">Aktuell</span>' : ''}</span>
+          <span class="cat-ex-arrow" onclick="applySwap(${ei}, ${jsArg(name)}, ${jsArg(exId)})" style="cursor:pointer;margin-right:10px">${isOriginal ? '✓' : '→'}</span>
+          <button onclick="deleteFromCatalog(${jsArg(name)}, event)" style="background:none;border:none;color:var(--muted2);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;transition:color 0.15s" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted2)'">✕</button>
         </div>
       `;
     }
     return `
-      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, '${safeName}', '${exId}')">
-        <span class="cat-ex-name">${name}${isOriginal ? ' <span class="cat-original-badge">Original</span>' : ''}${isActive ? ' <span class="cat-active-badge">Aktiv</span>' : ''}</span>
+      <div class="cat-ex-row ${isActive ? 'cat-ex-active' : ''}" onclick="applySwap(${ei}, ${jsArg(name)}, ${jsArg(exId)})">
+        <span class="cat-ex-name">${esc(name)}${isOriginal ? ' <span class="cat-original-badge">Original</span>' : ''}${isActive ? ' <span class="cat-active-badge">Aktiv</span>' : ''}</span>
         <span class="cat-ex-arrow">${isActive ? '✓' : '→'}</span>
       </div>
     `;
@@ -1996,11 +1997,11 @@ function renderCatalog() {
     <div class="cat-header">
       <div>
         <div class="cat-title">${catalogEditMode ? '✏ Katalog bearbeiten' : 'Übung tauschen'}</div>
-        <div class="cat-subtitle">${ex.name}</div>
+        <div class="cat-subtitle">${esc(ex.name)}</div>
       </div>
       <button class="modal-close" onclick="closeCatalog()">×</button>
     </div>
-    ${!catalogEditMode && swappedName ? `<button class="cat-reset-btn" onclick="resetSwap(${ei});closeCatalog()">↺ Zurück zu: ${ex.name}</button>` : ''}
+    ${!catalogEditMode && swappedName ? `<button class="cat-reset-btn" onclick="resetSwap(${ei});closeCatalog()">↺ Zurück zu: ${esc(ex.name)}</button>` : ''}
     ${catalogEditMode ? '<div style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:8px 20px 0">Tippe → zum Auswählen, ✕ zum Entfernen aus dem Katalog</div>' : ''}
     <div class="cat-tabs">${tabs}</div>
     <div class="cat-ex-list">${exercises}</div>
@@ -2336,7 +2337,7 @@ function renderPlanSwitcher() {
   wrap.innerHTML = `
     <button class="plan-select" onclick="openPlanManager()">
       <span class="plan-select-label">Plan</span>
-      <span class="plan-select-name">${plan ? plan.shortName : '—'}</span>
+      <span class="plan-select-name">${plan ? esc(plan.shortName) : '—'}</span>
       <span class="plan-select-count">${count}</span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>
     </button>`;
@@ -2355,7 +2356,7 @@ function openPlanManager() {
     return `
       <div class="plan-row ${active ? 'active' : ''}">
         <div style="flex:1;min-width:0;cursor:pointer" onclick="switchPlan('${plan.id}');closeModal()">
-          <div class="plan-row-name">${plan.name}${active ? ' <span class="plan-row-badge">aktiv</span>' : ''}</div>
+          <div class="plan-row-name">${esc(plan.name)}${active ? ' <span class="plan-row-badge">aktiv</span>' : ''}</div>
           <div class="plan-row-meta">${days} Trainingstage${plan.builtin ? ' · Vorlage' : ''}</div>
         </div>
         ${!plan.builtin ? `<button class="plan-row-btn" onclick="renamePlan('${plan.id}')" aria-label="Umbenennen">✎</button>` : ''}
@@ -2376,7 +2377,7 @@ function openPlanManager() {
         ${hiddenPlans.map(p => `
           <div class="plan-row" style="opacity:0.6">
             <div style="flex:1;min-width:0">
-              <div class="plan-row-name">${p.name}</div>
+              <div class="plan-row-name">${esc(p.name)}</div>
               <div class="plan-row-meta">${p.days.length} Trainingstage · Vorlage</div>
             </div>
             <button class="plan-row-btn" onclick="unhidePlan('${p.id}')">Einblenden</button>
@@ -2752,7 +2753,7 @@ function renderEditDay() {
   const di = currentDay;
   let html = `
     <div class="edit-mode-bar">
-      <span class="edit-mode-label">✏ Bearbeitungsmodus — ${day.type}</span>
+      <span class="edit-mode-label">✏ Bearbeitungsmodus — ${esc(day.type)}</span>
       <div style="display:flex;gap:8px">
         <button class="edit-discard-btn" onclick="toggleEditMode()">Abbrechen</button>
         <button class="edit-save-btn" onclick="saveCustomPlan()">Plan speichern</button>
@@ -2766,8 +2767,8 @@ function renderEditDay() {
           <span style="font-size:18px;color:var(--muted2);cursor:grab;padding:4px 6px;touch-action:none" ontouchstart="onDragHandleTouch(${ei}, event)">⠿</span>
           <span class="edit-ex-num">${String(ei+1).padStart(2,'0')}</span>
           <div style="flex:1">
-            <div class="edit-ex-name">${ex.name}</div>
-            <div style="font-size:12px;font-family:var(--mono);color:var(--muted);margin-top:2px">${ex.muscle}</div>
+            <div class="edit-ex-name">${esc(ex.name)}</div>
+            <div style="font-size:12px;font-family:var(--mono);color:var(--muted);margin-top:2px">${esc(ex.muscle)}</div>
           </div>
           <button class="edit-swap-btn" onclick="openEditCatalog(${di},${ei})">⇄ Tauschen</button>
           <button class="edit-swap-btn" style="color:var(--red);border-color:color-mix(in srgb, var(--red) 30%, transparent);margin-left:4px" onclick="deleteEditExercise(${di},${ei})">✕</button>
@@ -2779,11 +2780,11 @@ function renderEditDay() {
           </div>
           <div class="edit-field">
             <label>Wdh.</label>
-            <input type="text" id="edit-reps-${di}-${ei}" value="${ex.reps}">
+            <input type="text" id="edit-reps-${di}-${ei}" value="${esc(ex.reps)}">
           </div>
           <div class="edit-field">
             <label>Pause</label>
-            <input type="text" id="edit-pause-${di}-${ei}" value="${ex.pause}">
+            <input type="text" id="edit-pause-${di}-${ei}" value="${esc(ex.pause)}">
           </div>
           <div class="edit-field">
             <label>Schritt (kg)</label>
@@ -2849,7 +2850,7 @@ function renderNav() {
     const dotStyle = isHex ? `background:${d.color}` : '';
     return `
       <button class="${btnClass}" style="${btnStyle}" onclick="switchDay(${i})">
-        <span class="${dotClass}" style="${dotStyle}"></span>${d.type}
+        <span class="${dotClass}" style="${dotStyle}"></span>${esc(d.type)}
       </button>
     `;
   }).join('');
@@ -2866,7 +2867,7 @@ function renderDay() {
       main.innerHTML = `
         <div style="padding:16px;background:color-mix(in srgb, var(--red) 8%, transparent);border:0.5px solid color-mix(in srgb, var(--red) 30%, transparent);border-radius:10px;margin-top:10px">
           <div style="font-family:var(--mono);font-size:13px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
-          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${esc((err && err.message) || String(err))}</div>
           <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-top:10px">Screenshot davon hilft, den Fehler zu finden.</div>
         </div>
       `;
@@ -2996,11 +2997,11 @@ function renderDayInner() {
         <div class="exercise-header" onclick="toggleEx(${ei}, this)">
           <div style="flex:1;min-width:0">
             <div class="ex-title-row">
-              <span class="ex-name">${displayName}${swappedName ? ' <span style="font-size:12px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</span>
-              <span class="ex-target">${ex.reps}</span>
+              <span class="ex-name">${esc(displayName)}${swappedName ? ' <span style="font-size:12px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</span>
+              <span class="ex-target">${esc(ex.reps)}</span>
             </div>
             <div class="progress-dots">${progressDots}</div>
-            ${skipData ? `<div style="font-family:var(--mono);font-size:12px;color:var(--red);margin-top:2px">${skipData.reason}</div>` : ''}
+            ${skipData ? `<div style="font-family:var(--mono);font-size:12px;color:var(--red);margin-top:2px">${esc(skipData.reason)}</div>` : ''}
           </div>
           ${suggLabel}
           ${timerExerciseName === displayName && document.getElementById('timer-overlay')?.style.display !== 'none' ? '<span style="font-family:var(--mono);font-size:12px;color:var(--accent);margin-left:4px">⏱</span>' : ''}
@@ -3018,10 +3019,10 @@ function renderDayInner() {
           ${skipData ? `
             <div style="background:color-mix(in srgb, var(--red) 6%, transparent);border:0.5px solid color-mix(in srgb, var(--red) 20%, transparent);border-radius:6px;padding:12px;text-align:center">
               <div style="font-family:var(--mono);font-size:13px;color:var(--red)">Übung übersprungen</div>
-              <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px">${skipData.reason}</div>
+              <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px">${esc(skipData.reason)}</div>
             </div>
           ` : `
-          <div class="ex-detail-meta">${ex.muscle} · ${ex.sets} Sätze · Pause ${ex.pause}</div>
+          <div class="ex-detail-meta">${esc(ex.muscle)} · ${esc(ex.sets)} Sätze · Pause ${esc(ex.pause)}</div>
           <div class="sets-header">
             <span>Satz</span><span>Gewicht</span><span></span><span>Wdh.</span><span></span><span></span>
           </div>
@@ -3044,12 +3045,12 @@ function renderDayInner() {
       html += `
         <div class="set-row" id="set-row-${ei}-${s}">
           <span class="set-num">${s+1}</span>
-          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${placeholder}" value="${setData.weight}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${esc(placeholder)}" value="${esc(setData.weight)}" oninput="markDirty()" onchange="autoSave()">
           <div class="quick-btns">
             <button onclick="adjustWeight(${ei},${s},${step})">+</button>
             <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
           </div>
-          <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${ex.reps.split(/[–\-]/)[0]}" value="${setData.reps}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${esc(ex.reps.split(/[–\-]/)[0])}" value="${esc(setData.reps)}" oninput="markDirty()" onchange="autoSave()">
           <div class="quick-btns">
             <button onclick="adjustReps(${ei},${s},1)">+</button>
             <button onclick="adjustReps(${ei},${s},-1)">−</button>
@@ -3072,7 +3073,7 @@ function renderDayInner() {
     } // end !skipData
 
     if (ex.note) {
-      html += `<div class="ex-note ${ex.warn?'warning':''}">${ex.note}</div>`;
+      html += `<div class="ex-note ${ex.warn?'warning':''}">${esc(ex.note)}</div>`;
     }
 
     // Last session + suggestion detail
@@ -3088,8 +3089,8 @@ function renderDayInner() {
               const { high } = parseRepRange(ex.reps);
               const exceeded = s.reps && parseInt(s.reps) > high;
               const value = s.weight
-                ? `${s.weight} kg × ${s.reps || '—'} Wdh.`
-                : `${s.reps} Wdh.`;
+                ? `${esc(s.weight)} kg × ${esc(s.reps || '—')} Wdh.`
+                : `${esc(s.reps)} Wdh.`;
               return `<div class="history-entry">
                 <span class="history-date">Satz ${i+1}</span>
                 <span class="history-sets ${exceeded ? 'history-exceeded' : ''}">${value}${exceeded ? ' ↑' : ''}</span>
@@ -3119,7 +3120,7 @@ function renderDayInner() {
   noteWrap.style.marginTop = '8px';
   noteWrap.innerHTML = `
     <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Notiz zur Einheit</div>
-    <textarea class="session-note-input" id="session-note" placeholder="Wie war das Training heute? (optional)" oninput="saveNote()">${savedNote}</textarea>
+    <textarea class="session-note-input" id="session-note" placeholder="Wie war das Training heute? (optional)" oninput="saveNote()">${esc(savedNote)}</textarea>
   `;
   document.getElementById('main-content').appendChild(noteWrap);
 
@@ -3332,11 +3333,11 @@ function showTimerNextInfo(ei, s) {
   inputsEl.innerHTML = `
     <div style="text-align:center">
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:3px">GEWICHT</div>
-      <input type="number" id="timer-next-weight" value="${defaultWeight}" placeholder="${suggestion?.weight || '—'}" style="width:72px">
+      <input type="number" id="timer-next-weight" value="${esc(defaultWeight)}" placeholder="${esc(suggestion?.weight || '—')}" style="width:72px">
     </div>
     <div style="text-align:center">
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:3px">WDH.</div>
-      <input type="number" id="timer-next-reps" value="${defaultReps}" placeholder="${nextEx.reps.split(/[–\-]/)[0]}" style="width:60px">
+      <input type="number" id="timer-next-reps" value="${esc(defaultReps)}" placeholder="${esc(nextEx.reps.split(/[–\-]/)[0])}" style="width:60px">
     </div>
   `;
 
@@ -3687,77 +3688,6 @@ function switchDay(i) {
   renderDay();
 }
 
-function showHistory(searchTerm) {
-  const term = (searchTerm || '').toLowerCase().trim();
-  let html = `
-    <button class="modal-close" onclick="closeModal()">×</button>
-    <h2>Trainingsverlauf</h2>
-    <div style="margin:12px 0 16px">
-      <input type="text" id="history-search" placeholder="Übung suchen…" value="${searchTerm || ''}"
-        oninput="showHistory(this.value)"
-        style="background:var(--field);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:6px;width:100%;outline:none;box-sizing:border-box">
-    </div>
-  `;
-  let hasAny = false;
-
-  DAYS.forEach(day => {
-    const hist = getHistory(day.id);
-    if (!hist.length) return;
-
-    const filteredHist = hist.filter(entry => {
-      if (!term) return true;
-      return day.exercises.some((ex, ei) => {
-        const name = (entry.data?.swapped?.[ei] || ex.name).toLowerCase();
-        const sets = entry.data?.[ei]?.sets || (entry.data?.sets?.[ei]?.sets) || [];
-        return name.includes(term) && hasLoggedData(sets);
-      });
-    });
-
-    if (!filteredHist.length) return;
-    hasAny = true;
-    html += `<div style="margin-top:16px"><div style="font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px">${day.label} — ${day.type}</div>`;
-
-    filteredHist.slice(0, 10).forEach(entry => {
-      // Load note for this session
-      const noteKey = `gymbook:note:${day.id}:${entry.date}`;
-      const note = storageGet(noteKey) || '';
-      const skipData = entry.data?.sets || entry.data || {};
-
-      html += `<div class="history-full-entry"><div class="history-full-date">${formatDate(entry.date)}</div><div class="history-full-sets">`;
-      day.exercises.forEach((ex, ei) => {
-        const name = entry.data?.swapped?.[ei] || ex.name;
-        if (term && !name.toLowerCase().includes(term)) return;
-        const rawSets = entry.data?.[ei]?.sets || entry.data?.sets?.[ei]?.sets || [];
-        const skipped = entry.data?.[ei]?.skipped || entry.data?.sets?.[ei]?.skipped;
-        if (skipped) {
-          html += `<span style="color:var(--red)">✕ ${name}</span>: ${skipped.reason}<br>`;
-        } else {
-          const filled = loggedSets(rawSets);
-          if (filled.length) {
-            html += `<span style="color:var(--text)">${name}</span>: ${filled.map(s => formatSet(s)).join(', ')}<br>`;
-          }
-        }
-      });
-      if (note) {
-        html += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border-left:2px solid var(--accent);font-size:12px;color:var(--muted);font-style:italic">${note}</div>`;
-      }
-      html += `</div></div>`;
-    });
-    html += `</div>`;
-  });
-
-  if (!hasAny) {
-    html += `<div class="empty-state">${term ? `Keine Einträge für "${searchTerm}"` : 'Noch keine Einheiten gespeichert.'}</div>`;
-  }
-
-  document.getElementById('modal-content').innerHTML = html;
-  document.getElementById('modal').style.display = 'flex';
-  if (searchTerm !== undefined) {
-    const input = document.getElementById('history-search');
-    if (input) { input.focus(); const len = input.value.length; input.setSelectionRange(len, len); }
-  }
-}
-
 function exportSummary() {
   const day = DAYS[currentDay];
   const date = activeDateStr();
@@ -3987,7 +3917,7 @@ function renderExercises() {
       el.innerHTML = `
         <div style="padding:16px;background:color-mix(in srgb, var(--red) 8%, transparent);border:0.5px solid color-mix(in srgb, var(--red) 30%, transparent);border-radius:10px">
           <div style="font-family:var(--mono);font-size:13px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
-          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${esc((err && err.message) || String(err))}</div>
         </div>
       `;
     }
@@ -4062,11 +3992,11 @@ function renderExercisesInner() {
     const inDays = getDaysContainingExercise(ex.id);
 
     return `
-      <div class="ex-list-row" onclick="showExerciseDetail('${ex.id}', '${ex.name.replace(/'/g,"\\'")}')">
+      <div class="ex-list-row" onclick="showExerciseDetail(${jsArg(ex.id)}, ${jsArg(ex.name)})">
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:500;color:var(--text)">${ex.name}</div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">${esc(ex.name)}</div>
           <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-top:3px">
-            ${inDays.length ? inDays.map(d => d.dayType).join(' · ') : 'Nicht im aktuellen Plan'}
+            ${inDays.length ? inDays.map(d => esc(d.dayType)).join(' · ') : 'Nicht im aktuellen Plan'}
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
@@ -4079,7 +4009,7 @@ function renderExercisesInner() {
 
   document.getElementById('exercises-content').innerHTML = html || `
     <div style="font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;padding:30px 0">
-      ${term ? `Keine Übung gefunden für "${term}"` : 'Keine Übungen in dieser Kategorie'}
+      ${term ? `Keine Übung gefunden für "${esc(term)}"` : 'Keine Übungen in dieser Kategorie'}
     </div>
   `;
 }
@@ -4103,7 +4033,7 @@ function showExerciseDetail(exerciseId, exerciseName) {
 
   const html = `
     <button class="modal-close" onclick="closeExerciseDetail()">×</button>
-    <h2>${exerciseName}</h2>
+    <h2>${esc(exerciseName)}</h2>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0">
       <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
@@ -4129,8 +4059,8 @@ function showExerciseDetail(exerciseId, exerciseName) {
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Kommt vor in</div>
       ${inDays.length ? inDays.map(d => `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid var(--border)">
-          <span style="font-size:12px;color:var(--text)">${d.dayType}</span>
-          <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">${d.planName}</span>
+          <span style="font-size:12px;color:var(--text)">${esc(d.dayType)}</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">${esc(d.planName)}</span>
         </div>
       `).join('') : '<div style="font-family:var(--mono);font-size:13px;color:var(--muted)">Aktuell in keinem Plan enthalten</div>'}
     </div>
@@ -4158,7 +4088,7 @@ function renderStats() {
       el.innerHTML = `
         <div style="padding:16px;background:color-mix(in srgb, var(--red) 8%, transparent);border:0.5px solid color-mix(in srgb, var(--red) 30%, transparent);border-radius:10px">
           <div style="font-family:var(--mono);font-size:13px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
-          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${esc((err && err.message) || String(err))}</div>
         </div>
       `;
     }
@@ -4202,7 +4132,7 @@ function buildStatsHistoryHtml(completedKeys) {
     });
     if (!filtered.length) return;
 
-    historyHtml += `<div style="margin-bottom:14px"><div style="font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${dayDef ? dayDef.type : dayId.toUpperCase()}</div>`;
+    historyHtml += `<div style="margin-bottom:14px"><div style="font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${esc(dayDef ? dayDef.type : dayId.toUpperCase())}</div>`;
     filtered.forEach(k => {
       const date = k.split(':')[2];
       const raw = storageGet(k);
@@ -4210,11 +4140,11 @@ function buildStatsHistoryHtml(completedKeys) {
       historyHtml += `<div class="history-full-entry"><div class="history-full-date">${formatDate(date)}</div><div class="history-full-sets">`;
       resolveSessionRows(raw, dayId).forEach(({ name, slot }) => {
         if (term && !name.toLowerCase().includes(term)) return;
-        if (slot?.skipped) { historyHtml += `<span style="color:var(--red)">✕ ${name}</span>: ${slot.skipped.reason}<br>`; return; }
+        if (slot?.skipped) { historyHtml += `<span style="color:var(--red)">✕ ${esc(name)}</span>: ${esc(slot.skipped.reason)}<br>`; return; }
         const filled = loggedSets(slot?.sets);
-        if (filled.length) historyHtml += `<span style="color:var(--text)">${name}</span>: ${filled.map(s=>formatSet(s)).join(', ')}<br>`;
+        if (filled.length) historyHtml += `<span style="color:var(--text)">${esc(name)}</span>: ${filled.map(s=>esc(formatSet(s))).join(', ')}<br>`;
       });
-      if (note) historyHtml += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border-left:2px solid var(--accent);font-size:12px;color:var(--muted);font-style:italic">${note}</div>`;
+      if (note) historyHtml += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border-left:2px solid var(--accent);font-size:12px;color:var(--muted);font-style:italic">${esc(note)}</div>`;
       historyHtml += `</div></div>`;
     });
     historyHtml += `</div>`;
@@ -4388,7 +4318,7 @@ function renderStatsInner() {
         ${Object.entries(dayColors).map(([id,color]) => {
           const allDaysAcrossPlans = Object.values(PLAN_DEFS).flatMap(p => p.days);
           const d = allDaysAcrossPlans.find(x => x.id === id);
-          return `<div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:12px;color:var(--muted)">${d?.type||id}</span></div>`;
+          return `<div style="display:flex;align-items:center;gap:4px"><div style="width:7px;height:7px;border-radius:50%;background:${color}"></div><span style="font-family:var(--mono);font-size:12px;color:var(--muted)">${esc(d?.type||id)}</span></div>`;
         }).join('')}
       </div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:8px">● abgeschlossen · ○ angefangen</div>
@@ -4432,7 +4362,7 @@ function renderStatsInner() {
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Einheiten pro Tag</div>
         ${rows.map(({id, count, def}) => `
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-            <span style="font-family:var(--mono);font-size:12px;color:var(--muted);width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${def ? def.type : id.toUpperCase()}</span>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--muted);width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(def ? def.type : id.toUpperCase())}</span>
             <div style="flex:1;background:var(--bg3);border-radius:4px;height:5px;overflow:hidden">
               <div style="height:100%;background:${dayColors[id]||'var(--accent)'};border-radius:4px;width:${Math.round((count/maxD)*100)}%"></div>
             </div>
@@ -4462,7 +4392,7 @@ function renderStatsInner() {
       ${progressExercises.map(ex => `
         <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <span style="font-size:12px;font-weight:500;color:var(--text)">${ex.name}</span>
+            <span style="font-size:12px;font-weight:500;color:var(--text)">${esc(ex.name)}</span>
             <span style="font-family:var(--mono);font-size:13px;color:${ex.diff>0?'var(--accent)':'var(--muted)'}">${ex.diff>0?'+':''}${ex.diff} kg</span>
           </div>
           <div style="display:flex;align-items:flex-end;gap:3px;height:28px">
@@ -4482,7 +4412,7 @@ function renderStatsInner() {
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">🏆 Bestleistungen</div>
       ${Object.entries(bestLifts).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([name,weight])=>`
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)">
-          <span style="font-size:12px;color:var(--text)">${name}</span>
+          <span style="font-size:12px;color:var(--text)">${esc(name)}</span>
           <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${weight} kg</span>
         </div>
       `).join('')}
@@ -4491,7 +4421,7 @@ function renderStatsInner() {
     <!-- VERLAUF mit Suche -->
     <div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Verlauf</div>
-      <input type="text" placeholder="Übung suchen…" value="${statsSearchTerm}"
+      <input type="text" placeholder="Übung suchen…" value="${esc(statsSearchTerm)}"
         oninput="statsSearchTerm=this.value;updateStatsHistory()"
         style="background:var(--field);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:6px;width:100%;outline:none;box-sizing:border-box;margin-bottom:12px">
       <div id="stats-history">${historyHtml}</div>
@@ -4512,29 +4442,29 @@ function showDayDetail(dateStr) {
   const noteKey = `gymbook:note:${dayId}:${dateStr}`;
   const note = storageGet(noteKey) || '';
   const title = day ? day.type : (Object.values(PLAN_DEFS).flatMap(p => p.days).find(x => x.id === dayId)?.type || dayId.toUpperCase());
-  let html = `<button class="modal-close" onclick="closeModal()">×</button><h2>${title} · ${formatDate(dateStr)}</h2><div style="margin-top:14px">`;
+  let html = `<button class="modal-close" onclick="closeModal()">×</button><h2>${esc(title)} · ${formatDate(dateStr)}</h2><div style="margin-top:14px">`;
 
   if (metaMap) {
     // Neue Struktur: unabhängig von der aktuellen DAYS-Struktur
     Object.entries(metaMap).forEach(([ei, m]) => {
       const skip = sets[ei]?.skipped;
-      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:13px;color:var(--red)">✕ ${m.name}: ${skip.reason}</div>`; return; }
+      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:13px;color:var(--red)">✕ ${esc(m.name)}: ${esc(skip.reason)}</div>`; return; }
       const filled = loggedSets(sets[ei]?.sets);
       if (!filled.length) return;
-      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${m.name}</div><div style="font-family:var(--mono);font-size:13px;color:var(--muted)">${filled.map(s=>formatSet(s)).join(' · ')}</div></div>`;
+      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${esc(m.name)}</div><div style="font-family:var(--mono);font-size:13px;color:var(--muted)">${filled.map(s=>esc(formatSet(s))).join(' · ')}</div></div>`;
     });
   } else if (day) {
     // Legacy: kein meta-Feld – über aktuellen DAYS-Stand auflösen
     day.exercises.forEach((ex, ei) => {
       const name = swapped[ei] || ex.name;
       const skip = sets[ei]?.skipped;
-      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:13px;color:var(--red)">✕ ${name}: ${skip.reason}</div>`; return; }
+      if (skip) { html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border);font-family:var(--mono);font-size:13px;color:var(--red)">✕ ${esc(name)}: ${esc(skip.reason)}</div>`; return; }
       const filled = loggedSets(sets[ei]?.sets);
       if (!filled.length) return;
-      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${name}</div><div style="font-family:var(--mono);font-size:13px;color:var(--muted)">${filled.map(s=>formatSet(s)).join(' · ')}</div></div>`;
+      html += `<div style="padding:8px 0;border-bottom:0.5px solid var(--border)"><div style="font-size:12px;font-weight:500;color:var(--text);margin-bottom:3px">${esc(name)}</div><div style="font-family:var(--mono);font-size:13px;color:var(--muted)">${filled.map(s=>esc(formatSet(s))).join(' · ')}</div></div>`;
     });
   }
-  if (note) html += `<div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted);font-style:italic">${note}</div>`;
+  if (note) html += `<div style="margin-top:10px;padding:8px 10px;background:var(--bg3);border-radius:6px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted);font-style:italic">${esc(note)}</div>`;
   html += '</div>';
   document.getElementById('modal-content').innerHTML = html;
   document.getElementById('modal').style.display = 'flex';
@@ -4551,7 +4481,7 @@ function renderHome() {
       el.innerHTML = `
         <div style="padding:16px;background:color-mix(in srgb, var(--red) 8%, transparent);border:0.5px solid color-mix(in srgb, var(--red) 30%, transparent);border-radius:10px">
           <div style="font-family:var(--mono);font-size:13px;color:var(--red);font-weight:600;margin-bottom:8px">⚠ Rendering-Fehler</div>
-          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="font-family:var(--mono);font-size:13px;color:var(--muted);line-height:1.6;word-break:break-word">${esc((err && err.message) || String(err))}</div>
         </div>
       `;
     }
@@ -4618,10 +4548,10 @@ function renderHomeInner() {
       const titleType = lastDay ? lastDay.type : (Object.values(PLAN_DEFS).flatMap(p => p.days).find(x => x.id === lastDayId)?.type || lastDayId.toUpperCase());
       lastSessionHtml = `
         <div class="home-card">
-          <div class="home-card-title">Letztes Training · ${titleType} · ${formatDate(lastDate)}</div>
+          <div class="home-card-title">Letztes Training · ${esc(titleType)} · ${formatDate(lastDate)}</div>
           ${entries.map(e => `
             <div class="home-last-ex">
-              <span class="home-last-ex-name">${e.name}</span>
+              <span class="home-last-ex-name">${esc(e.name)}</span>
               <span class="home-last-ex-val">${e.weight} ${e.unit || 'kg'}</span>
             </div>
           `).join('')}
@@ -4713,14 +4643,14 @@ function renderHomeInner() {
     ${todayCompleted ? `
     <div class="home-card" style="border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.04)">
       <div class="home-card-title">✓ Heute abgeschlossen</div>
-      <div class="home-next-type">${todaySession ? todaySession.type : 'Training'}</div>
-      <div class="home-next-day" style="margin-top:4px">${nextDay ? `Als Nächstes: ${nextDay.type}` : 'Genieß die Erholung!'}</div>
+      <div class="home-next-type">${todaySession ? esc(todaySession.type) : 'Training'}</div>
+      <div class="home-next-day" style="margin-top:4px">${nextDay ? `Als Nächstes: ${esc(nextDay.type)}` : 'Genieß die Erholung!'}</div>
     </div>
     ` : nextDay ? `
     <div class="home-card" style="border-color:color-mix(in srgb, var(--accent) 30%, transparent);background:color-mix(in srgb, var(--accent) 5%, transparent)">
       <div class="home-card-title">Als Nächstes dran</div>
-      <div class="home-next-type">${nextDay.type}</div>
-      <div class="home-next-day">${nextDay.duration}${rotation && rotation.lastDayType ? ` · zuletzt ${rotation.lastDayType} am ${formatDate(rotation.lastDate)}` : ''}</div>
+      <div class="home-next-type">${esc(nextDay.type)}</div>
+      <div class="home-next-day">${esc(nextDay.duration)}${rotation && rotation.lastDayType ? ` · zuletzt ${esc(rotation.lastDayType)} am ${formatDate(rotation.lastDate)}` : ''}</div>
       <button class="home-start-btn" onclick="startTrainingFromHome(${DAYS.indexOf(nextDay)})">Training starten →</button>
     </div>
     ` : ''}
@@ -4789,7 +4719,7 @@ function renderHomeInner() {
       <div class="home-card-title">🏆 Bestleistungen</div>
       ${topPRs.map(([name, w]) => `
         <div class="home-pr-row">
-          <span style="font-size:12px;color:var(--text)">${name}</span>
+          <span style="font-size:12px;color:var(--text)">${esc(name)}</span>
           <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${w} kg</span>
         </div>
       `).join('')}
@@ -4826,7 +4756,7 @@ function showFinishModal() {
     <div style="text-align:center;padding:8px 0 16px">
       <div style="font-size:40px;margin-bottom:8px">🏆</div>
       <div style="font-size:20px;font-weight:700;letter-spacing:-0.3px">Training abgeschlossen!</div>
-      <div style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:4px">${day.type} · ${formatDate(date)}</div>
+      <div style="font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:4px">${esc(day.type)} · ${formatDate(date)}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
       ${duration ? `
@@ -4843,7 +4773,7 @@ function showFinishModal() {
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Notiz zum Training</div>
       <textarea id="finish-note" placeholder="Wie war das Training heute? (optional)"
         style="width:100%;background:var(--field);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:16px;padding:12px;border-radius:8px;outline:none;resize:none;height:80px;box-sizing:border-box;line-height:1.5"
-        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border2)'">${storageGet(`gymbook:note:${day.id}:${date}`) || ''}</textarea>
+        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border2)'">${esc(storageGet(`gymbook:note:${day.id}:${date}`) || '')}</textarea>
     </div>
     <button onclick="completeSession()" style="width:100%;background:var(--accent);color:var(--on-accent);border:none;font-family:var(--mono);font-size:13px;font-weight:600;padding:15px;border-radius:10px;cursor:pointer;margin-bottom:8px">✓ Training abschließen</button>
     <button onclick="closeFinishModal()" style="width:100%;background:none;border:0.5px solid var(--border2);color:var(--muted);font-family:var(--mono);font-size:12px;padding:13px;border-radius:10px;cursor:pointer">Weiter trainieren</button>
