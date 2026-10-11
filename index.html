@@ -883,7 +883,18 @@ let activeDate = null; // null = heute
 let dirty = false;
 
 function getKey(dayId, date) { return `gymbook:${dayId}:${date}`; }
-function todayStr() { return new Date().toISOString().slice(0,10); }
+// Datum als JJJJ-MM-TT in ÖRTLICHER Zeit. toISOString() rechnet in UTC –
+// damit galt in Deutschland bis 1 Uhr (Winter) bzw. 2 Uhr (Sommer) noch der
+// Vortag, und ein Training kurz nach Mitternacht landete am falschen Datum.
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// "JJJJ-MM-TT" als örtliches Datum lesen (new Date(str) würde es als UTC lesen)
+function parseLocalDate(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+function todayStr() { return localDateStr(new Date()); }
 function activeDateStr() { return activeDate || todayStr(); }
 
 function formatDate(iso) {
@@ -1565,8 +1576,11 @@ function getLastEntryById(exerciseId, exerciseName) {
   return null;
 }
 
-function getPersonalRecordById(exerciseId, exerciseName) {
-  const allKeys = getSessionKeys();
+// excludeKey: diese Einheit nicht mitzählen. Für die Rekord-Meldung nötig –
+// die laufende Einheit ist beim Abhaken schon gespeichert, ohne Ausschluss
+// wurde das neue Gewicht mit sich selbst verglichen und war nie größer.
+function getPersonalRecordById(exerciseId, exerciseName, excludeKey) {
+  const allKeys = getSessionKeys().filter(k => k !== excludeKey);
   let best = 0;
   allKeys.forEach(k => {
     const raw = storageGet(k);
@@ -2101,8 +2115,7 @@ async function saveCustomPlan() {
 // rotiert statt an Kalendertagen zu hängen.
 // Kalenderwoche (ISO) als Schlüssel, damit sich Einheiten gruppieren lassen
 function isoWeekKey(dateStr) {
-  const d = new Date(dateStr);
-  d.setHours(0,0,0,0);
+  const d = parseLocalDate(dateStr);
   d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));   // auf Donnerstag der Woche
   const week1 = new Date(d.getFullYear(), 0, 4);
   const week = 1 + Math.round(((d - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
@@ -2123,11 +2136,11 @@ function getWeekStreak() {
   });
   let streak = 0;
   const cursor = new Date();
-  const currentWeek = isoWeekKey(cursor.toISOString().slice(0,10));
+  const currentWeek = isoWeekKey(localDateStr(cursor));
   if ((counts[currentWeek] || 0) >= target) streak++;
   cursor.setDate(cursor.getDate() - 7);
   while (true) {
-    const wk = isoWeekKey(cursor.toISOString().slice(0,10));
+    const wk = isoWeekKey(localDateStr(cursor));
     if ((counts[wk] || 0) >= target) { streak++; cursor.setDate(cursor.getDate() - 7); }
     else break;
   }
@@ -2769,10 +2782,12 @@ function renderDayInner() {
   document.getElementById('today-date').textContent = `${day.type} · ${formatDate(date)}`;
 
   // Week stats
+  // Montag der laufenden Woche. Vorher: getDate() - getDay() + 1 – das sprang
+  // am Sonntag (getDay() = 0) auf den NÄCHSTEN Montag, die Woche zeigte 0/3.
   const weekStart = new Date();
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  weekStart.setHours(0,0,0,0);
-  const weekKeys = getSessionKeys(true).filter(k => new Date(k.split(':')[2]) >= weekStart);
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  const weekStartStr = localDateStr(weekStart);
+  const weekKeys = getSessionKeys(true).filter(k => k.split(':')[2] >= weekStartStr);
   const weekDone = weekKeys.length;
   const weekTotal = getWeeklyTarget();
 
@@ -3489,8 +3504,15 @@ function toggleDone(ei, s) {
       const ex = DAYS[currentDay].exercises[ei];
       const displayName = swappedExercises[ei] || ex.name;
       const displayId = swappedExerciseIds[ei] || ex.id || slugify(ex.name);
-      const pr = getPersonalRecordById(displayId, displayName);
-      if (weight > pr) showPRCelebration(displayName, weight);
+      // Bisheriger Rekord OHNE die laufende Einheit …
+      const pr = getPersonalRecordById(displayId, displayName, getKey(DAYS[currentDay].id, activeDateStr()));
+      // … plus die schon abgehakten anderen Sätze dieser Übung heute, damit
+      // die Meldung nicht bei jedem weiteren Satz mit gleichem Gewicht kommt.
+      const todayBest = Math.max(0, ...sessionData[ei].sets
+        .filter((st, i) => i !== s && st.done)
+        .map(st => parseFloat(st.weight) || 0));
+      // pr > 0: beim allerersten Training einer Übung gibt es keinen Rekord zu brechen
+      if (pr > 0 && weight > pr && weight > todayBest) showPRCelebration(displayName, weight);
     }
 
     // Check if all sets done → auto-collapse
@@ -3533,6 +3555,17 @@ function markDirty() {
 function autoSave() {
   collectInputValues();
   saveSession();
+}
+
+// "Training starten" auf der Startseite: immer HEUTE. Vorher blieb ein zuvor
+// gewähltes Nachtrag-Datum stehen und das neue Training landete dort.
+function startTrainingFromHome(i) {
+  if (dirty) { collectInputValues(); saveSession(); }
+  currentDay = i;
+  activeDate = null;
+  sessionStartTime = null;
+  renderNav();
+  switchTab('training');
 }
 
 function switchDay(i) {
@@ -4022,6 +4055,70 @@ function renderStats() {
   }
 }
 
+// Verlaufsliste der Statistik-Seite. Eigene Funktion, damit die Suche nur
+// diese Liste neu aufbaut (updateStatsHistory) statt der ganzen Seite – sonst
+// wurde das Suchfeld bei jedem Buchstaben ersetzt und die iPhone-Tastatur
+// ging zu.
+// Wichtig: Die angezeigten Übungsnamen kommen aus der GESPEICHERTEN Session
+// (meta), nicht aus dem aktuell aktiven Plan. Sonst würden nach einer
+// Plananpassung die Namen der heutigen Übungen auf alte Einträge gelegt.
+function buildStatsHistoryHtml(completedKeys) {
+  const term = statsSearchTerm.toLowerCase().trim();
+  let historyHtml = '';
+  const allDaysAcrossPlans = Object.values(PLAN_DEFS).flatMap(p => p.days);
+
+  // Zeilen einer Session auflösen – bevorzugt über meta, sonst über den Plan
+  const resolveSessionRows = (raw, dayId) => {
+    const sets = raw?.sets || raw || {};
+    if (raw?.meta) {
+      return Object.entries(raw.meta).map(([ei, m]) => ({ name: m.name, slot: sets[ei] }));
+    }
+    const day = allDaysAcrossPlans.find(d => d.id === dayId);
+    if (!day) return [];
+    const swapped = raw?.swapped || {};
+    return day.exercises.map((ex, ei) => ({ name: swapped[ei] || ex.name, slot: sets[ei] }));
+  };
+
+  // Über alle Tage aller Pläne, damit auch Einheiten aus inaktiven Plänen auftauchen
+  const dayIdsWithSessions = [...new Set(completedKeys.map(k => k.split(':')[1]))];
+  dayIdsWithSessions.forEach(dayId => {
+    const dayDef = allDaysAcrossPlans.find(d => d.id === dayId);
+    const dayKeys = sortByDate(completedKeys.filter(k => k.split(':')[1] === dayId), true).slice(0,10);
+    if (!dayKeys.length) return;
+
+    const filtered = dayKeys.filter(k => {
+      if (!term) return true;
+      return resolveSessionRows(storageGet(k), dayId).some(r => r.name.toLowerCase().includes(term));
+    });
+    if (!filtered.length) return;
+
+    historyHtml += `<div style="margin-bottom:14px"><div style="font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${dayDef ? dayDef.type : dayId.toUpperCase()}</div>`;
+    filtered.forEach(k => {
+      const date = k.split(':')[2];
+      const raw = storageGet(k);
+      const note = storageGet(`gymbook:note:${dayId}:${date}`) || '';
+      historyHtml += `<div class="history-full-entry"><div class="history-full-date">${formatDate(date)}</div><div class="history-full-sets">`;
+      resolveSessionRows(raw, dayId).forEach(({ name, slot }) => {
+        if (term && !name.toLowerCase().includes(term)) return;
+        if (slot?.skipped) { historyHtml += `<span style="color:var(--red)">✕ ${name}</span>: ${slot.skipped.reason}<br>`; return; }
+        const filled = loggedSets(slot?.sets);
+        if (filled.length) historyHtml += `<span style="color:var(--text)">${name}</span>: ${filled.map(s=>formatSet(s)).join(', ')}<br>`;
+      });
+      if (note) historyHtml += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border-left:2px solid var(--accent);font-size:12px;color:var(--muted);font-style:italic">${note}</div>`;
+      historyHtml += `</div></div>`;
+    });
+    historyHtml += `</div>`;
+  });
+  return historyHtml || STATS_HISTORY_EMPTY;
+}
+
+const STATS_HISTORY_EMPTY = '<div style="font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;padding:20px 0">Noch keine abgeschlossenen Einheiten</div>';
+
+function updateStatsHistory() {
+  const el = document.getElementById('stats-history');
+  if (el) el.innerHTML = buildStatsHistoryHtml(getSessionKeys(true));
+}
+
 function renderStatsInner() {
   const now = new Date();
   const year = now.getFullYear();
@@ -4127,56 +4224,7 @@ function renderStatsInner() {
 
   const streak = getWeekStreak();
 
-  // History with search
-  // Wichtig: Die angezeigten Übungsnamen kommen aus der GESPEICHERTEN Session
-  // (meta), nicht aus dem aktuell aktiven Plan. Sonst würden nach einer
-  // Plananpassung die Namen der heutigen Übungen auf alte Einträge gelegt.
-  const term = statsSearchTerm.toLowerCase().trim();
-  let historyHtml = '';
-  const allDaysAcrossPlans = Object.values(PLAN_DEFS).flatMap(p => p.days);
-
-  // Zeilen einer Session auflösen – bevorzugt über meta, sonst über den Plan
-  const resolveSessionRows = (raw, dayId) => {
-    const sets = raw?.sets || raw || {};
-    if (raw?.meta) {
-      return Object.entries(raw.meta).map(([ei, m]) => ({ name: m.name, slot: sets[ei] }));
-    }
-    const day = allDaysAcrossPlans.find(d => d.id === dayId);
-    if (!day) return [];
-    const swapped = raw?.swapped || {};
-    return day.exercises.map((ex, ei) => ({ name: swapped[ei] || ex.name, slot: sets[ei] }));
-  };
-
-  // Über alle Tage aller Pläne, damit auch Einheiten aus inaktiven Plänen auftauchen
-  const dayIdsWithSessions = [...new Set(completedKeys.map(k => k.split(':')[1]))];
-  dayIdsWithSessions.forEach(dayId => {
-    const dayDef = allDaysAcrossPlans.find(d => d.id === dayId);
-    const dayKeys = sortByDate(completedKeys.filter(k => k.split(':')[1] === dayId), true).slice(0,10);
-    if (!dayKeys.length) return;
-
-    const filtered = dayKeys.filter(k => {
-      if (!term) return true;
-      return resolveSessionRows(storageGet(k), dayId).some(r => r.name.toLowerCase().includes(term));
-    });
-    if (!filtered.length) return;
-
-    historyHtml += `<div style="margin-bottom:14px"><div style="font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">${dayDef ? dayDef.type : dayId.toUpperCase()}</div>`;
-    filtered.forEach(k => {
-      const date = k.split(':')[2];
-      const raw = storageGet(k);
-      const note = storageGet(`gymbook:note:${dayId}:${date}`) || '';
-      historyHtml += `<div class="history-full-entry"><div class="history-full-date">${formatDate(date)}</div><div class="history-full-sets">`;
-      resolveSessionRows(raw, dayId).forEach(({ name, slot }) => {
-        if (term && !name.toLowerCase().includes(term)) return;
-        if (slot?.skipped) { historyHtml += `<span style="color:var(--red)">✕ ${name}</span>: ${slot.skipped.reason}<br>`; return; }
-        const filled = loggedSets(slot?.sets);
-        if (filled.length) historyHtml += `<span style="color:var(--text)">${name}</span>: ${filled.map(s=>formatSet(s)).join(', ')}<br>`;
-      });
-      if (note) historyHtml += `<div style="margin-top:6px;padding:6px 8px;background:var(--bg3);border-radius:4px;border-left:2px solid var(--accent);font-size:12px;color:var(--muted);font-style:italic">${note}</div>`;
-      historyHtml += `</div></div>`;
-    });
-    historyHtml += `</div>`;
-  });
+  const historyHtml = buildStatsHistoryHtml(completedKeys);
 
   // Body weight for stats
   const bwKeys = storageGetAllKeys().filter(k => k.startsWith('gymbook:bodyweight:')).sort();
@@ -4334,9 +4382,9 @@ function renderStatsInner() {
     <div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Verlauf</div>
       <input type="text" placeholder="Übung suchen…" value="${statsSearchTerm}"
-        oninput="statsSearchTerm=this.value;renderStats()"
+        oninput="statsSearchTerm=this.value;updateStatsHistory()"
         style="background:var(--field);border:1px solid var(--border2);color:var(--text);font-family:var(--mono);font-size:16px;padding:10px 12px;border-radius:6px;width:100%;outline:none;box-sizing:border-box;margin-bottom:12px">
-      ${historyHtml || '<div style="font-family:var(--mono);font-size:13px;color:var(--muted);text-align:center;padding:20px 0">Noch keine abgeschlossenen Einheiten</div>'}
+      <div id="stats-history">${historyHtml}</div>
     </div>
   `;
 }
@@ -4421,8 +4469,8 @@ function renderHomeInner() {
   // Week stats – only completed sessions
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
-  weekStart.setHours(0,0,0,0);
-  const weekKeys = getSessionKeys(true).filter(k => new Date(k.split(':')[2]) >= weekStart);
+  const weekStartStr = localDateStr(weekStart);
+  const weekKeys = getSessionKeys(true).filter(k => k.split(':')[2] >= weekStartStr);
   const weekDone = weekKeys.length;
 
   // Total sessions – only completed
@@ -4509,7 +4557,7 @@ function renderHomeInner() {
   // Wochenfortschritt zählt nur noch Einheiten, keine bestimmten Wochentage
   const weeklyTarget = getWeeklyTarget();
   const weekdayShortNames = ['So','Mo','Di','Mi','Do','Fr','Sa'];
-  const weekDoneDays = weekKeys.map(k => weekdayShortNames[new Date(k.split(':')[2]).getDay()]);
+  const weekDoneDays = weekKeys.map(k => weekdayShortNames[parseLocalDate(k.split(':')[2]).getDay()]);
   const weekPills = Array.from({length: Math.max(weeklyTarget, weekDone)}, (_, i) => {
     const done = i < weekDone;
     return `<div class="home-week-pill ${done ? 'done' : 'pending'}">
@@ -4563,7 +4611,7 @@ function renderHomeInner() {
       <div class="home-card-title">Als Nächstes dran</div>
       <div class="home-next-type">${nextDay.type}</div>
       <div class="home-next-day">${nextDay.duration}${rotation && rotation.lastDayType ? ` · zuletzt ${rotation.lastDayType} am ${formatDate(rotation.lastDate)}` : ''}</div>
-      <button class="home-start-btn" onclick="currentDay=${DAYS.indexOf(nextDay)};switchTab('training')">Training starten →</button>
+      <button class="home-start-btn" onclick="startTrainingFromHome(${DAYS.indexOf(nextDay)})">Training starten →</button>
     </div>
     ` : ''}
 
