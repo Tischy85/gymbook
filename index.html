@@ -562,6 +562,7 @@
   <button class="menu-item" onclick="switchTab('stats');toggleMenu()"><span class="menu-item-icon">📊</span>Statistiken</button>
   <div class="menu-divider"></div>
   <button class="menu-item" onclick="toggleMenu();syncNow()"><span class="menu-item-icon">☁</span><span id="menu-sync-label">Jetzt synchronisieren</span></button>
+  <button class="menu-item" onclick="toggleMenu();openCloudKeyModal()"><span class="menu-item-icon">🔑</span>Cloud-Schlüssel</button>
   <div class="menu-storage" id="menu-storage"></div>
   <div class="menu-divider"></div>
   <button class="menu-item" onclick="toggleTimerEnabled()"><span class="menu-item-icon">⏱</span><span id="timer-toggle-label">Pausentimer: An</span></button>
@@ -902,7 +903,63 @@ function weekdayFromDate(iso) {
 }
 
 // ── JSONBin Storage ──────────────────────────────────────────
-const JSONBIN_KEY = '$2a$10$VCqYDBoWnSoJIPwURownZ.CIQBrg2EjsTlU0D9HCpRcV1ww22TT/a';
+// Der Schlüssel steht bewusst NICHT im Code: Er wird einmal über das Menü
+// eingegeben und nur im lokalen Speicher dieses Geräts abgelegt. Der Präfix
+// "gymbook_" (Unterstrich) sorgt dafür, dass er weder exportiert noch in die
+// Cloud hochgeladen wird – beides erfasst nur "gymbook:"-Schlüssel.
+const JSONBIN_KEY_STORE = 'gymbook_jsonbinKey';
+const JSONBIN_KEY_TYPE_STORE = 'gymbook_jsonbinKeyType';   // 'access' | 'master'
+
+function getJsonbinKey() {
+  try { return localStorage.getItem(JSONBIN_KEY_STORE) || ''; } catch(e) { return ''; }
+}
+
+function jsonbinAuthHeaders() {
+  let type = 'access';
+  try { type = localStorage.getItem(JSONBIN_KEY_TYPE_STORE) || 'access'; } catch(e) {}
+  return { [type === 'master' ? 'X-Master-Key' : 'X-Access-Key']: getJsonbinKey() };
+}
+
+function openCloudKeyModal() {
+  let type = 'access';
+  try { type = localStorage.getItem(JSONBIN_KEY_TYPE_STORE) || 'access'; } catch(e) {}
+  const hasKey = !!getJsonbinKey();
+  document.getElementById('modal-content').innerHTML = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Cloud-Schlüssel</h2>
+    <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin:12px 0 14px;line-height:1.6">
+      Wird nur auf diesem Gerät gespeichert. ${hasKey ? 'Ein Schlüssel ist bereits hinterlegt.' : 'Noch kein Schlüssel hinterlegt – die App arbeitet nur lokal.'}
+    </div>
+    <select id="cloud-key-type" style="width:100%;background:var(--field);border:none;color:var(--text);font-size:16px;padding:11px 12px;border-radius:10px;margin-bottom:8px">
+      <option value="access" ${type !== 'master' ? 'selected' : ''}>Access-Key (empfohlen)</option>
+      <option value="master" ${type === 'master' ? 'selected' : ''}>Master-Key</option>
+    </select>
+    <input type="password" id="cloud-key-input" autocomplete="off" placeholder="${hasKey ? 'Neuen Schlüssel eingeben' : 'Schlüssel eingeben'}"
+      style="width:100%;background:var(--field);border:none;color:var(--text);font-size:16px;padding:11px 12px;border-radius:10px;box-sizing:border-box;margin-bottom:14px">
+    <button onclick="saveCloudKey()" style="width:100%;background:var(--accent);color:var(--on-accent);border:none;font-size:15px;font-weight:600;padding:14px;border-radius:12px;cursor:pointer;margin-bottom:8px">Speichern & verbinden</button>
+    ${hasKey ? `<button onclick="removeCloudKey()" style="width:100%;background:none;border:none;color:var(--red);font-size:14px;padding:10px;cursor:pointer">Schlüssel von diesem Gerät entfernen</button>` : ''}
+  `;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function saveCloudKey() {
+  const val = (document.getElementById('cloud-key-input')?.value || '').trim();
+  const type = document.getElementById('cloud-key-type')?.value === 'master' ? 'master' : 'access';
+  try {
+    if (val) localStorage.setItem(JSONBIN_KEY_STORE, val);
+    localStorage.setItem(JSONBIN_KEY_TYPE_STORE, type);
+  } catch(e) { setStatus('⚠ Schlüssel konnte nicht gespeichert werden', false); return; }
+  closeModal();
+  cloudInit();
+}
+
+function removeCloudKey() {
+  try { localStorage.removeItem(JSONBIN_KEY_STORE); } catch(e) {}
+  cloudLoaded = false;
+  closeModal();
+  setStatus('Cloud getrennt – nur lokal gespeichert', false);
+}
+
 const JSONBIN_API = 'https://api.jsonbin.io/v3/b';
 const FIXED_BIN_ID = '6a1d9bd121f9ee59d2a5bc77';
 let binId = FIXED_BIN_ID;
@@ -915,9 +972,10 @@ async function cloudInit() {
 }
 
 async function cloudPull() {
+  if (!getJsonbinKey()) { setStatus('Cloud nicht eingerichtet – nur lokal', false); return; }
   try {
     const res = await fetch(`${JSONBIN_API}/${binId}/latest`, {
-      headers: { 'X-Master-Key': JSONBIN_KEY }
+      headers: jsonbinAuthHeaders()
     });
     if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
     const data = await res.json();
@@ -965,13 +1023,13 @@ async function cloudPull() {
 let offlineQueue = [];
 
 async function cloudPush() {
-  if (!binId) return false;
+  if (!binId || !getJsonbinKey()) return false;
   const payload = JSON.stringify({ gymbook: compactForCloud(cloudData) });
   lastCloudSize = payload.length;
   try {
     const res = await fetch(`${JSONBIN_API}/${binId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY },
+      headers: { 'Content-Type': 'application/json', ...jsonbinAuthHeaders() },
       body: payload
     });
     // fetch meldet nur Netzwerkausfälle als Fehler, NICHT wenn der Server
