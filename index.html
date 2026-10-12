@@ -2989,7 +2989,7 @@ function renderDayInner() {
     const displayName = swappedName || ex.name;
     const displayId = swappedExerciseIds[ei] || ex.id || slugify(ex.name);
     const lastEntry = getLastEntryById(displayId, displayName) || getLastEntry(day.id, ei);
-    const suggestion = calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5);
+    const suggestion = suggestionFor(displayId, displayName, ex, lastEntry);
 
     // Gewichtsvorschlag als eigener Block rechts – die Zahl, die beim
     // Rangehen ans Gerät zählt. Delta kommt aus der echten Schrittweite
@@ -3096,11 +3096,13 @@ function renderDayInner() {
       });
     }
 
+    const targets = setTargets(lastEntry, ex.reps, suggestion, activeSets);
     if (!skipData) {
     for (let s = 0; s < activeSets; s++) {
       const setData = sessionData[ei].sets[s] || { weight: '', reps: '', done: false };
       const suggWeight = suggestion ? suggestion.weight : '';
       const placeholder = setData.weight ? '' : (suggWeight ? `${suggWeight}` : (lastEntry ? lastEntry[s]?.weight || '—' : '—'));
+      const repsPlaceholder = targets[s]?.reps !== '' && targets[s]?.reps != null ? targets[s].reps : ex.reps.split(/[–\-]/)[0];
       html += `
         <div class="set-row" id="set-row-${ei}-${s}">
           <span class="set-num">${s+1}</span>
@@ -3109,7 +3111,7 @@ function renderDayInner() {
             <button onclick="adjustWeight(${ei},${s},${step})">+</button>
             <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
           </div>
-          <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${esc(ex.reps.split(/[–\-]/)[0])}" value="${esc(setData.reps)}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${esc(repsPlaceholder)}" value="${esc(setData.reps)}" oninput="markDirty()" onchange="autoSave()">
           <div class="quick-btns">
             <button onclick="adjustReps(${ei},${s},1)">+</button>
             <button onclick="adjustReps(${ei},${s},-1)">−</button>
@@ -3158,12 +3160,17 @@ function renderDayInner() {
             ${suggestion ? `<div class="sugg-detail">${
               suggestion.reason === 'upfast'
                 ? `Alle Sätze bei ${suggestion.high} Wdh. mit 3+ in Reserve – doppelter Schritt`
+              : suggestion.reason === 'learnfast'
+                ? `Alle Sätze bei ${suggestion.high} Wdh. – Erhöhungen steckst du hier gut weg, daher doppelter Schritt`
+              : suggestion.reason === 'confirm'
+                ? `Obergrenze geschafft – nach Erhöhungen brachen die Wdh. hier zuletzt oft ein, daher erst noch einmal bestätigen`
               : suggestion.reason === 'up'
                 ? `Alle Sätze bei ${suggestion.high} Wdh. – Zeit für mehr Gewicht`
                 : suggestion.reason === 'below'
                   ? `Noch unter ${suggestion.low} Wdh. – Gewicht halten`
                   : `Ziel ${suggestion.low}–${suggestion.high} noch nicht voll – Gewicht halten`
-            }</div>` : ''}
+            }</div>
+            ${targets.some(t => t.reps !== '') ? `<div class="sugg-detail" style="font-style:normal;color:var(--text)">Ziel heute: ${esc(suggestion.weight)} kg × ${targets.map(t => t.reps).join(' · ')} Wdh.</div>` : ''}` : ''}
           </div>
         `;
       }
@@ -3249,6 +3256,10 @@ function toggleWarmup(ei, k) {
   collectInputValues();
   const w = sessionData[ei]?.warmup?.[k];
   if (!w) return;
+  if (!w.done) {
+    fillFromPlaceholder(`ww-${ei}-${k}`, w, 'weight');
+    fillFromPlaceholder(`wr-${ei}-${k}`, w, 'reps');
+  }
   w.done = !w.done;
   ['wchk', 'ww', 'wr'].forEach(p => {
     const el = document.getElementById(`${p}-${ei}-${k}`);
@@ -3375,7 +3386,82 @@ function parseRepRange(repsStr) {
   return { low: single, high: single };
 }
 
-function calcWeightSuggestion(lastSets, repsTarget, step) {
+// ── LERNENDE STEIGERUNG ───────────────────────────────────────
+// Die App wertet aus, wie du bei einer Übung auf Gewichtserhöhungen
+// reagierst (letzte 4 Erhöhungen, gemessen am aktuellen Zielbereich):
+//   'careful' – mind. die Hälfte der Erhöhungen ließ die Wdh. unter die
+//               Untergrenze fallen → erst erhöhen, wenn die Obergrenze in
+//               ZWEI Einheiten in Folge geschafft wurde
+//   'fast'    – mind. 2 Erhöhungen, alle ohne Einbruch, und dabei trotzdem
+//               die Obergrenze erreicht → doppelter Schritt
+//   'normal'  – sonst (oder zu wenig Daten)
+function topOf(sets) {
+  const logged = loggedSets(sets).filter(s => s.weight && s.reps);
+  if (!logged.length) return null;
+  const w = Math.max(...logged.map(s => parseFloat(s.weight) || 0));
+  return { w, reps: logged.filter(s => parseFloat(s.weight) === w).map(s => parseInt(s.reps, 10) || 0) };
+}
+
+function learnProgression(exerciseId, exerciseName, repsRange) {
+  const { low, high } = parseRepRange(repsRange);
+  const none = { mode: 'normal', events: 0, fails: 0, easies: 0 };
+  if (isNaN(low) || isNaN(high)) return none;
+  // Einheiten chronologisch, ohne das aktive Datum (heute wird ja erst trainiert)
+  const date = activeDateStr(), seen = new Set(), sessions = [];
+  for (const e of getExerciseEntries(exerciseId, exerciseName)) {
+    if (e.date === date || seen.has(e.key) || !hasLoggedData(e.sets)) continue;
+    seen.add(e.key);
+    sessions.push(e.sets);
+  }
+  sessions.reverse();
+  const events = [];
+  for (let i = 1; i < sessions.length; i++) {
+    const prev = topOf(sessions[i - 1]), cur = topOf(sessions[i]);
+    if (!prev || !cur || !(cur.w > prev.w)) continue;
+    events.push({ fail: cur.reps.some(r => r < low), easy: cur.reps.every(r => r >= high) });
+  }
+  const recent = events.slice(-4);
+  const fails = recent.filter(e => e.fail).length, easies = recent.filter(e => e.easy).length;
+  let mode = 'normal';
+  if (recent.length >= 2 && fails / recent.length >= 0.5) mode = 'careful';
+  else if (easies >= 2 && fails === 0) mode = 'fast';
+  return { mode, events: recent.length, fails, easies };
+}
+
+// Vorschlag inkl. gelerntem Profil – an allen Stellen, die einen Vorschlag
+// für eine Übung brauchen (Trainingskarte, Timer)
+function suggestionFor(exerciseId, exerciseName, ex, lastEntry) {
+  const profile = learnProgression(exerciseId, exerciseName, ex.reps);
+  const prevSets = profile.mode === 'careful' ? getLastEntriesById(exerciseId, exerciseName, 2)[1] : null;
+  return calcWeightSuggestion(lastEntry, ex.reps, ex.step || 2.5, { profile, prevSets });
+}
+
+// Ziel für jeden einzelnen Satz: { weight, reps }.
+//   Gewicht erhöht     → Untergrenze anpeilen
+//   noch bestätigen    → Obergrenze erneut
+//   Gewicht gehalten   → je Satz eine Wdh. mehr als letztes Mal (max. Obergrenze)
+function setTargets(lastSets, repsRange, suggestion, count) {
+  const { low, high } = parseRepRange(repsRange);
+  const lowOk = isNaN(low) ? '' : low;
+  if (!suggestion) return Array.from({ length: count }, () => ({ weight: '', reps: lowOk }));
+  const increased = suggestion.weight > suggestion.prevWeight;
+  const top = topOf(lastSets);
+  const fallback = top && top.reps.length ? Math.min(...top.reps) : low;
+  return Array.from({ length: count }, (_, s) => {
+    let reps;
+    if (isNaN(low) || isNaN(high)) reps = '';
+    else if (increased) reps = low;
+    else if (suggestion.reason === 'confirm') reps = high;
+    else {
+      const ls = lastSets?.[s];
+      const r = ls && parseFloat(ls.weight) === suggestion.prevWeight ? (parseInt(ls.reps, 10) || fallback) : fallback;
+      reps = Math.min(high, Math.max(low, r + 1));
+    }
+    return { weight: suggestion.weight, reps };
+  });
+}
+
+function calcWeightSuggestion(lastSets, repsTarget, step, opts = {}) {
   const logged = loggedSets(lastSets).filter(s => s.weight && s.reps);
   if (!logged.length) return null;
   const { low, high } = parseRepRange(repsTarget);
@@ -3401,11 +3487,22 @@ function calcWeightSuggestion(lastSets, repsTarget, step) {
   // Das Gewicht war deutlich zu leicht – dann ein doppelter Schritt.
   const plentyLeft = topSets.every(s => s.rir !== undefined && s.rir >= 3);
 
+  const mode = opts.profile?.mode || 'normal';
+  const base = { prevWeight: maxWeight, high, low, profile: opts.profile };
+
   // Nur ganze Schritte – halbe Stufen lassen sich am Gerät nicht einstellen.
-  if (allReachedTop && plentyLeft) return { weight: maxWeight + 2 * inc, reason: 'upfast', prevWeight: maxWeight, high, low };
-  if (allReachedTop) return { weight: maxWeight + inc, reason: 'up',   prevWeight: maxWeight, high, low };
-  if (allBelowLow)   return { weight: maxWeight,       reason: 'below',prevWeight: maxWeight, high, low };
-  return { weight: maxWeight, reason: 'hold', prevWeight: maxWeight, high, low };
+  if (allReachedTop && plentyLeft) return { ...base, weight: maxWeight + 2 * inc, reason: 'upfast' };
+  if (allReachedTop && mode === 'careful') {
+    // Erst erhöhen, wenn die Einheit davor auf demselben Gewicht ebenfalls
+    // die Obergrenze geschafft hat
+    const prev = topOf(opts.prevSets);
+    const confirmed = prev && prev.w === maxWeight && prev.reps.every(r => r >= high);
+    if (!confirmed) return { ...base, weight: maxWeight, reason: 'confirm' };
+  }
+  if (allReachedTop && mode === 'fast') return { ...base, weight: maxWeight + 2 * inc, reason: 'learnfast' };
+  if (allReachedTop) return { ...base, weight: maxWeight + inc, reason: 'up' };
+  if (allBelowLow) return { ...base, weight: maxWeight, reason: 'below' };
+  return { ...base, weight: maxWeight, reason: 'hold' };
 }
 
 function toggleEx(ei, headerEl) {
@@ -3510,12 +3607,15 @@ function showTimerNextInfo(ei, s) {
   const nextName = swappedExercises[nextEi] || nextEx.name;
   const nextId = swappedExerciseIds[nextEi] || nextEx.id || slugify(nextEx.name);
   const lastEntry = getLastEntryById(nextId, nextName) || getLastEntry(day.id, nextEi);
-  const suggestion = calcWeightSuggestion(lastEntry, nextEx.reps, nextEx.step || 2.5);
+  const suggestion = suggestionFor(nextId, nextName, nextEx, lastEntry);
+  const nextTargets = setTargets(lastEntry, nextEx.reps, suggestion, nextSet + 1);
 
   // Get current weight/reps from last set of this exercise as default
   const prevSetData = sessionData[nextEi]?.sets?.[nextSet - 1] || sessionData[nextEi]?.sets?.[0];
   const defaultWeight = prevSetData?.weight || (suggestion ? suggestion.weight : '');
-  const defaultReps = prevSetData?.reps || nextEx.reps.split(/[–\-]/)[0];
+  // Bereits eingetragen > Satzziel > Untergrenze
+  const ownReps = sessionData[nextEi]?.sets?.[nextSet]?.reps;
+  const defaultReps = ownReps || nextTargets[nextSet]?.reps || prevSetData?.reps || nextEx.reps.split(/[–\-]/)[0];
 
   const infoEl = document.getElementById('timer-next-info');
   const labelEl = document.getElementById('timer-next-label');
@@ -3770,10 +3870,24 @@ function updateProgressBars(ei) {
   bars.forEach((bar, i) => bar.classList.toggle('done', i < doneCount));
 }
 
+// Beim Abhaken leere Felder mit dem angezeigten Vorschlag (Platzhalter)
+// füllen. Vorher wurde ein Satz ohne Eintippen als "erledigt" ohne Werte
+// gespeichert und fehlte danach in Verlauf, Rekorden und Vorschlägen.
+function fillFromPlaceholder(inputId, set, field) {
+  const el = document.getElementById(inputId);
+  if (!el || el.value || !/^\d+(\.\d+)?$/.test(el.placeholder)) return;
+  el.value = el.placeholder;
+  set[field] = el.placeholder;
+}
+
 function toggleDone(ei, s) {
   collectInputValues();
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
   if (!sessionData[ei].sets[s]) sessionData[ei].sets[s] = { weight: '', reps: '', done: false };
+  if (!sessionData[ei].sets[s].done) {
+    fillFromPlaceholder(`w-${ei}-${s}`, sessionData[ei].sets[s], 'weight');
+    fillFromPlaceholder(`r-${ei}-${s}`, sessionData[ei].sets[s], 'reps');
+  }
   sessionData[ei].sets[s].done = !sessionData[ei].sets[s].done;
   const btn = document.getElementById(`chk-${ei}-${s}`);
   const w = document.getElementById(`w-${ei}-${s}`);
@@ -3793,7 +3907,9 @@ function toggleDone(ei, s) {
   updateProgressBars(ei);
 
   if (done) {
-    // Auto-copy weight and reps to next set if empty
+    // Gewicht in den nächsten Satz übernehmen, falls dort leer. Die
+    // Wiederholungen bewusst NICHT – dort steht das eigene Satzziel als
+    // Vorschlag (setTargets), das sonst überschrieben würde.
     const nextS = s + 1;
     const activeSets = sessionData[ei]?.activeSets ?? DAYS[currentDay].exercises[ei].sets;
     if (nextS < activeSets) {
@@ -3802,11 +3918,6 @@ function toggleDone(ei, s) {
         sessionData[ei].sets[nextS].weight = sessionData[ei].sets[s].weight;
         const nextW = document.getElementById(`w-${ei}-${nextS}`);
         if (nextW) nextW.value = sessionData[ei].sets[s].weight;
-      }
-      if (!sessionData[ei].sets[nextS].reps && sessionData[ei].sets[s].reps) {
-        sessionData[ei].sets[nextS].reps = sessionData[ei].sets[s].reps;
-        const nextR = document.getElementById(`r-${ei}-${nextS}`);
-        if (nextR) nextR.value = sessionData[ei].sets[s].reps;
       }
     }
 
@@ -4256,6 +4367,16 @@ function showExerciseDetail(exerciseId, exerciseName) {
   const bestE1 = getBestE1rmById(exerciseId, exerciseName);
   const lastE1 = bestE1rm(lastSets);
   const stagnation = getStagnation(exerciseId, exerciseName);
+  // Gelerntes Steigerungsprofil – braucht den Zielbereich aus dem Plan
+  const planEx = Object.values(PLAN_DEFS).flatMap(p => p.days).flatMap(d => d.exercises).find(e => e.id === exerciseId);
+  const profile = planEx ? learnProgression(exerciseId, exerciseName, planEx.reps) : null;
+  const profileText = !profile || profile.events < 2
+    ? null
+    : profile.mode === 'careful'
+      ? `<b>Vorsichtig steigern.</b> Nach ${profile.fails} von ${profile.events} Erhöhungen fielen die Wdh. unter ${parseRepRange(planEx.reps).low}. Erhöht wird erst, wenn die Obergrenze zweimal in Folge klappt.`
+    : profile.mode === 'fast'
+      ? `<b>Zügig steigern.</b> ${profile.easies} von ${profile.events} Erhöhungen hast du direkt mit der Obergrenze geschafft – daher doppelte Schritte.`
+      : `<b>Normal steigern.</b> Die letzten ${profile.events} Erhöhungen liefen unauffällig.`;
 
   // Verlauf: Gewicht wenn vorhanden, sonst Wiederholungen (Körpergewichtsübungen)
   const weights = history.map(sets => {
@@ -4288,6 +4409,10 @@ function showExerciseDetail(exerciseId, exerciseName) {
           <div style="font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent)">${bestE1} kg</div>
           ${lastE1 > 0 ? `<div style="font-size:12px;color:var(--muted)">zuletzt ${lastE1} kg</div>` : ''}
         </div>
+      </div>` : ''}
+      ${profileText ? `
+      <div style="grid-column:1/-1;background:var(--bg3);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:3px">Gelernt aus deinen Erhöhungen</div>${profileText}
       </div>` : ''}
       ${stagnation ? `
       <div style="grid-column:1/-1;background:color-mix(in srgb, var(--legs) 12%, transparent);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
@@ -5200,6 +5325,8 @@ function openTimerSettings() {
       <span>Ton am Pausenende <span style="font-size:13px;color:var(--muted)">(nur bei offener App, nicht im Lautlos-Modus)</span></span>
     </label>
     <button onclick="saveTimerSettings()" style="width:100%;background:var(--accent);color:var(--on-accent);border:none;font-size:15px;font-weight:600;padding:14px;border-radius:12px;cursor:pointer">Speichern</button>
+    <button onclick="testTimerShortcut()" style="width:100%;background:var(--bg3);color:var(--text);border:none;font-size:14px;font-weight:600;padding:12px;border-radius:12px;cursor:pointer;margin-top:8px">Kurzbefehl testen (60 s)</button>
+    <div style="font-size:12px;color:var(--muted2);margin-top:6px;line-height:1.5">Startet den Kurzbefehl mit dem eingetragenen Namen und 60 Sekunden – der iPhone-Timer sollte sofort mit 1:00 loslaufen.</div>
   `;
   document.getElementById('modal').style.display = 'flex';
 }
@@ -5213,6 +5340,13 @@ function saveTimerSettings() {
   lsSet(TIMER_SOUND_STORE, document.getElementById('timer-sound')?.checked ? 'on' : 'off');
   updateTimerLabel();
   closeModal();
+}
+
+// Testknopf in den Einstellungen: nutzt den gerade eingetragenen Namen,
+// auch wenn noch nicht gespeichert wurde
+function testTimerShortcut() {
+  const name = (document.getElementById('timer-shortcut-name')?.value || '').trim() || 'GymBook Pause';
+  location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(name)}&input=text&text=60`;
 }
 
 // Startet den Kurzbefehl mit der Pausenlänge in Sekunden als Eingabe.
