@@ -894,7 +894,7 @@ function saveCloudKey() {
 }
 
 function removeCloudKey() {
-  try { localStorage.removeItem(JSONBIN_KEY_STORE); } catch(e) {}
+  try { localStorage.removeItem(JSONBIN_KEY_STORE); localStorage.removeItem(CLOUD_CACHE_STORE); } catch(e) {}
   cloudLoaded = false;
   invalidateExerciseIndex();   // Daten kommen ab jetzt aus dem lokalen Speicher
   closeModal();
@@ -908,62 +908,148 @@ let cloudData = {};
 let cloudLoaded = false;
 
 async function cloudInit() {
+  // Frische lokale Kopie vorhanden (App wurde gerade erst neu gestartet)?
+  // Dann keine Anfrage verbrauchen.
+  const cache = getJsonbinKey() ? readCloudCache() : null;
+  if (cache && Date.now() - cache.at < CACHE_FRESH_MS) {
+    adoptCloudState(decodeCloudData(cache.data), cache.at);
+    setStatus('☁ Synchronisiert', true);
+    renderAfterSync();
+    return;
+  }
   setStatus('☁ Verbinde…', false);
   await cloudPull();
+}
+
+// Zeitpunkt des letzten erfolgreichen Abrufs – zeigt, wie aktuell der
+// Stand dieses Geräts ist
+let lastPullAt = 0;
+
+// Aktuellen Cloud-Stand holen und in die normale Form übersetzen.
+// { data, size } bei Erfolg, { error: Status } bei Ablehnung; wirft bei
+// Netzwerkfehler oder Zeitüberschreitung.
+async function fetchRemote() {
+  const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}/latest`, { headers: jsonbinAuthHeaders() });
+  if (!res.ok) return { error: res.status };
+  const json = await res.json();
+  const raw = json.record?.gymbook || {};
+  const size = JSON.stringify(raw).length;
+  return { data: decodeCloudData(raw), size };
+}
+
+// Eigene, noch nicht hochgeladene Änderungen (Sicherheitsliste) und
+// Löschungen auf einen Cloud-Stand legen. Gibt die Anzahl zurück.
+// local: Datenstand dieses Geräts im Arbeitsspeicher (beim Hochladen);
+// ohne Angabe wird aus dem lokalen Speicher gelesen (beim Abrufen).
+function applyLocalChanges(base, local) {
+  let n = 0;
+  let pend = [];
+  try { pend = JSON.parse(localStorage.getItem('gymbook:pending') || '[]'); } catch(e) {}
+  pend.forEach(k => {
+    if (local && k in local) { base[k] = local[k]; n++; return; }
+    const raw = localStorage.getItem(k);
+    if (raw === null) return;
+    try { base[k] = JSON.parse(raw); n++; } catch(e) {}
+  });
+  getDeletedKeys().forEach(k => { if (k in base) { delete base[k]; n++; } });
+  return n;
 }
 
 async function cloudPull() {
   if (!getJsonbinKey()) { setStatus('Cloud nicht eingerichtet – nur lokal', false); return; }
   try {
-    const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}/latest`, {
-      headers: jsonbinAuthHeaders()
-    });
-    if (!res.ok) { setStatus(`⚠ Cloud-Fehler (${res.status})`, false); return; }
-    const data = await res.json();
-    cloudData = data.record?.gymbook || {};
-    const receivedSize = JSON.stringify(cloudData).length;
-    decodeCloudData(cloudData);          // kompakte Cloud-Schreibweise → normale Form
-    cloudLoaded = true;
-    invalidateExerciseIndex();           // komplett neuer Datenstand
-
-    // Änderungen, die es vor dem letzten Schließen nicht mehr in die Cloud
-    // geschafft haben, aus dem lokalen Speicher zurückholen – sonst würde
-    // der Serverstand sie stillschweigend überschreiben.
-    try {
-      const pend = JSON.parse(localStorage.getItem('gymbook:pending') || '[]');
-      let restored = 0;
-      pend.forEach(k => {
-        const raw = localStorage.getItem(k);
-        if (raw === null) return;
-        try { cloudData[k] = JSON.parse(raw); restored++; } catch(e) {}
-      });
-      // Offline gelöschte Einträge auch im frisch geladenen Stand löschen
-      getDeletedKeys().forEach(k => {
-        if (k in cloudData) { delete cloudData[k]; restored++; }
-      });
-      if (restored) { schedulePush(); }
-    } catch(e) {}
-    loadUserPlans();
-    migratePlanStorage();
-    loadActivePlan();
-    loadCustomPlan();
-    loadCustomCatalog();
-    loadPauseSettings();
+    const remote = await fetchRemote();
+    if (remote.error) { setStatus(`⚠ Cloud-Fehler (${remote.error})`, false); return; }
+    adoptCloudState(remote.data, Date.now());
 
     // Liegt in der Cloud noch die lange Schreibweise, einmalig kompakt
     // zurückschreiben. Danach ist beides gleich groß – kein weiterer Upload.
     try {
-      if (JSON.stringify(compactForCloud(cloudData)).length < receivedSize * 0.95) schedulePush();
+      if (JSON.stringify(compactForCloud(cloudData)).length < remote.size * 0.95) schedulePush();
     } catch(e) {}
 
+    saveCloudCache();
     setStatus('☁ Synchronisiert', true);
-    renderNav();
-    if (currentTab === 'home') renderHome();
-    else { renderPlanSwitcher(); renderDay(); }
+    renderAfterSync();
   } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
   }
+}
+
+// Einen Cloud-Stand (frisch geladen oder aus der lokalen Kopie) übernehmen
+function adoptCloudState(data, at) {
+  cloudData = data;
+  cloudLoaded = true;
+  lastPullAt = at;
+  invalidateExerciseIndex();           // komplett neuer Datenstand
+
+  // Änderungen, die es vor dem letzten Schließen nicht mehr in die Cloud
+  // geschafft haben, aus dem lokalen Speicher zurückholen – sonst würde
+  // der Serverstand sie stillschweigend überschreiben.
+  // (cloudData ist hier schon der Serverstand – die eigenen Änderungen
+  // kommen deshalb aus dem lokalen Speicher.)
+  try {
+    if (applyLocalChanges(cloudData)) schedulePush();
+  } catch(e) {}
+  loadUserPlans();
+  migratePlanStorage();
+  loadActivePlan();
+  loadCustomPlan();
+  loadCustomCatalog();
+  loadPauseSettings();
+}
+
+function renderAfterSync() {
+  renderNav();
+  if (currentTab === 'home') renderHome();
+  else { renderPlanSwitcher(); renderDay(); }
+}
+
+// ── LOKALE KOPIE DES CLOUD-STANDS ─────────────────────────────
+// Der kostenlose JSONBin-Zugang hat ein festes Kontingent an Anfragen, das
+// sich nicht erneuert. iOS beendet die App im Hintergrund (z. B. beim
+// Wechsel zu TikTok) gern komplett – jeder Neustart hätte den Stand neu
+// abgerufen. Ist die letzte Kopie jünger als CACHE_FRESH_MS, wird sie
+// stattdessen verwendet. Hochladen holt ohnehin vorher den aktuellen Stand,
+// es kann also nichts überschrieben werden.
+const CLOUD_CACHE_STORE = 'gymbook_cloudCache';     // "gymbook_" → kein Export/Upload
+const CACHE_FRESH_MS = 10 * 60 * 1000;
+
+function saveCloudCache() {
+  try {
+    localStorage.setItem(CLOUD_CACHE_STORE, JSON.stringify({ at: lastPullAt, data: compactForCloud(cloudData) }));
+  } catch(e) {}   // Speicher voll o. ä. – dann eben ohne Kopie
+}
+
+function readCloudCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CLOUD_CACHE_STORE) || 'null');
+    return c && c.at && c.data ? c : null;
+  } catch(e) { return null; }
+}
+
+// ── ANFRAGEZÄHLER ─────────────────────────────────────────────
+// Zählt die Anfragen an JSONBin auf DIESEM Gerät (gesamt + laufende Woche),
+// damit der Verbrauch des Kontingents sichtbar wird.
+const REQUEST_LOG_STORE = 'gymbook_requestLog';
+function countCloudRequest() {
+  try {
+    const log = JSON.parse(localStorage.getItem(REQUEST_LOG_STORE) || '{}');
+    const wk = isoWeekKey(todayStr());
+    if (log.week !== wk) { log.week = wk; log.weekCount = 0; }
+    log.weekCount = (log.weekCount || 0) + 1;
+    log.total = (log.total || 0) + 1;
+    if (!log.since) log.since = todayStr();
+    localStorage.setItem(REQUEST_LOG_STORE, JSON.stringify(log));
+  } catch(e) {}
+}
+function getRequestLog() {
+  try {
+    const log = JSON.parse(localStorage.getItem(REQUEST_LOG_STORE) || '{}');
+    if (log.week !== isoWeekKey(todayStr())) log.weekCount = 0;
+    return log;
+  } catch(e) { return {}; }
 }
 
 // Altlast: frühere Offline-Warteschlange – wird nicht mehr gebraucht, die
@@ -975,7 +1061,12 @@ try { localStorage.removeItem('gymbook:offlinequeue'); } catch(e) {}
 // die Anfrage abgebrochen und landet im normalen Offline-Zweig (catch).
 const CLOUD_TIMEOUT_MS = 15000;
 const KEEPALIVE_LIMIT = 60000;   // knapp unter der 64-KB-Grenze für keepalive
+const MERGE_FRESH_MS = 2 * 60 * 1000;      // so lange gilt ein Abruf als "frisch"
+// Ab so langer Abwesenheit beim Zurückkehren neu laden. Bewusst großzügig:
+// jeder Abruf verbraucht eine Anfrage vom festen JSONBin-Kontingent.
+const FOREGROUND_REFRESH_MS = 30 * 60 * 1000;
 function fetchWithTimeout(url, opts) {
+  if (String(url).includes('jsonbin.io')) countCloudRequest();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), CLOUD_TIMEOUT_MS);
   return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(t));
@@ -1001,16 +1092,39 @@ async function cloudPush(opts = {}) {
   // klappt das nicht, wird NICHT hochgeladen. Die Änderungen bleiben lokal
   // in der Sicherheitsliste (gymbook:pending) und werden beim nächsten
   // erfolgreichen Laden automatisch übernommen.
+  let freshlyPulled = false;   // in DIESEM Aufruf gerade frisch geladen
   if (!cloudLoaded) {
     // Beim Schließen bleibt keine Zeit, erst zu laden – dann lieber nichts
     // senden. Die Änderungen liegen sicher in der Sicherheitsliste.
     if (opts.closing) return false;
     await cloudPullOnce();
+    freshlyPulled = true;
     if (!cloudLoaded) {
       setStatus('⚠ Cloud nicht erreichbar – nur lokal gesichert', false);
       return false;
     }
   }
+
+  // MEHRERE GERÄTE: Statt den eigenen (evtl. veralteten) Stand komplett
+  // hochzuladen, erst den aktuellen Cloud-Stand holen und nur die eigenen
+  // Änderungen darauflegen. So überschreibt z. B. ein seit gestern offener
+  // Laptop-Tab nicht das Training, das inzwischen am Handy gespeichert wurde.
+  if (opts.closing) {
+    // Beim Schließen bleibt keine Zeit für den Abruf. Nur senden, wenn der
+    // eigene Stand ganz frisch ist – sonst holt die Sicherheitsliste es beim
+    // nächsten Öffnen sauber zusammengeführt nach.
+    if (Date.now() - lastPullAt > MERGE_FRESH_MS) return false;
+  } else if (!freshlyPulled) {   // eben erst nachgeladen → kein zweiter Abruf nötig
+    let remote;
+    try { remote = await fetchRemote(); }
+    catch (e) { setStatus('⚠ Offline – wird später synchronisiert', false); return false; }
+    if (remote.error) { setStatus(`⚠ Cloud-Fehler (${remote.error}) – nur lokal gesichert`, false); return false; }
+    applyLocalChanges(remote.data, cloudData);
+    cloudData = remote.data;
+    lastPullAt = Date.now();
+    invalidateExerciseIndex();
+  }
+
   const payload = JSON.stringify({ gymbook: compactForCloud(cloudData) });
   try {
     const res = await fetchWithTimeout(`${JSONBIN_API}/${binId}`, {
@@ -1039,6 +1153,7 @@ async function cloudPush(opts = {}) {
     }
     clearPendingKeys();
     clearDeletedKeys();                 // Löschungen sind jetzt in der Cloud
+    saveCloudCache();                   // lokale Kopie = was jetzt in der Cloud liegt
     return true;
   } catch(e) {
     // Nichts weiter vormerken: Sicherheitsliste und Löschliste bleiben bis
@@ -1328,6 +1443,17 @@ function flushPush() {
   }
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushPush(); });
+
+// Zurück in der App nach längerer Zeit: Cloud-Stand neu laden, damit z. B.
+// am Rechner geänderte Pläne auch hier ankommen. Nicht im Training-Tab
+// (würde die aufgeklappten Karten mitten in der Einheit neu aufbauen) und
+// nicht im Bearbeitungsmodus.
+let lastHiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { lastHiddenAt = Date.now(); return; }
+  if (!cloudLoaded || !getJsonbinKey() || editMode || currentTab === 'training') return;
+  if (lastHiddenAt && Date.now() - lastHiddenAt >= FOREGROUND_REFRESH_MS) cloudPullOnce();
+});
 window.addEventListener('pagehide', flushPush);
 
 function storageGet(key) {
@@ -5408,7 +5534,15 @@ function updateMenuSyncInfo() {
     </div>
     <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
       <div style="height:100%;width:${pct}%;background:${col}"></div>
-    </div>`;
+    </div>
+    ${(() => {
+      const log = getRequestLog();
+      if (!log.total) return '';
+      return `<div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-top:6px">
+        Anfragen: ${log.weekCount || 0} diese Woche · ${log.total} gesamt<br>
+        <span style="font-size:11px">dieses Gerät, seit ${formatDate(log.since)}</span>
+      </div>`;
+    })()}`;
 }
 
 // "Einheit löschen" nur anbieten, wenn im Training gerade eine Einheit mit
