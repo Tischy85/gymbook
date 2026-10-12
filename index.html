@@ -1650,11 +1650,26 @@ function loggedSets(sets) {
 }
 
 // Einheitliche Darstellung eines Satzes: "80kg×8" bzw. "12 Wdh." ohne Gewicht.
+// Zahl für die ANZEIGE in deutscher Schreibweise: 87.5 → "87,5",
+// 12345 → "12.345". digits: feste Nachkommastellen (z. B. 1 → "80,0").
+// Gespeichert und in Eingabefeldern bleibt der Punkt – nur der sichtbare
+// Text wird umgewandelt. Nicht-Zahlen werden unverändert zurückgegeben.
+function num(v, digits) {
+  const x = typeof v === 'number' ? v : parseFloat(v);
+  if (!isFinite(x)) return v ?? '';
+  return x.toLocaleString('de-DE', digits != null
+    ? { minimumFractionDigits: digits, maximumFractionDigits: digits }
+    : { maximumFractionDigits: 2 });
+}
+
+// Gegenstück zu num(): "87,5" oder "87.5" → 87.5 (NaN, wenn keine Zahl)
+function parseNum(v) { return parseFloat(String(v ?? '').replace(',', '.')); }
+
 function formatSet(s, opts) {
   const long = opts && opts.long;
   const rir = s.rir !== undefined ? ` · RIR ${s.rir === 4 ? '4+' : s.rir}` : '';
   const sep = long ? ' kg × ' : 'kg×';
-  if (s.weight) return `${s.weight}${sep}${s.reps || '?'}${long ? ' Wdh.' : ''}${rir}`;
+  if (s.weight) return `${num(s.weight)}${sep}${s.reps || '?'}${long ? ' Wdh.' : ''}${rir}`;
   return `${s.reps || '?'} Wdh.${rir}`;
 }
 
@@ -1864,7 +1879,7 @@ function adjustReps(ei, s, delta) {
 function adjustWeight(ei, s, delta) {
   const input = document.getElementById(`w-${ei}-${s}`);
   if (!input) return;
-  const current = parseFloat(input.value) || parseFloat(input.placeholder) || 0;
+  const current = parseFloat(input.value) || parseNum(input.placeholder) || 0;
   const newVal = Math.max(0, Math.round((current + delta) * 100) / 100);
   input.value = newVal;
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
@@ -3123,10 +3138,10 @@ function renderDayInner() {
     let suggLabel = '';
     if (suggestion) {
       const delta = Math.round((suggestion.weight - suggestion.prevWeight) * 100) / 100;
-      const deltaStr = delta > 0 ? `↑${delta}` : 'halten';
+      const deltaStr = delta > 0 ? `↑${num(delta)}` : 'halten';
       const col = delta > 0 ? 'var(--accent3)' : 'var(--accent)';
       suggLabel = `<div class="sugg-block">
-        <div class="sugg-value" style="color:${col}">${suggestion.weight}</div>
+        <div class="sugg-value" style="color:${col}">${num(suggestion.weight)}</div>
         <div class="sugg-unit">kg · ${deltaStr}</div>
       </div>`;
     }
@@ -3213,7 +3228,7 @@ function renderDayInner() {
         html += `
         <div class="set-row warmup-row">
           <span class="set-num">W</span>
-          <input class="set-input ${w.done?'done':''}" id="ww-${ei}-${k}" type="number" step="${step}" min="0" placeholder="${esc(t.weight || '—')}" value="${esc(w.weight)}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${w.done?'done':''}" id="ww-${ei}-${k}" type="number" step="${step}" min="0" placeholder="${esc(t.weight ? num(t.weight) : '—')}" value="${esc(w.weight)}" oninput="markDirty()" onchange="autoSave()">
           <div></div>
           <input class="set-input ${w.done?'done':''}" id="wr-${ei}-${k}" type="number" min="0" placeholder="${t.reps}" value="${esc(w.reps)}" oninput="markDirty()" onchange="autoSave()">
           <div></div>
@@ -3232,7 +3247,7 @@ function renderDayInner() {
       html += `
         <div class="set-row" id="set-row-${ei}-${s}">
           <span class="set-num">${s+1}</span>
-          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${esc(placeholder)}" value="${esc(setData.weight)}" oninput="markDirty()" onchange="autoSave()">
+          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${esc(num(placeholder))}" value="${esc(setData.weight)}" oninput="markDirty()" onchange="autoSave()">
           <div class="quick-btns">
             <button onclick="adjustWeight(${ei},${s},${step})">+</button>
             <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
@@ -3276,7 +3291,7 @@ function renderDayInner() {
               const { high } = parseRepRange(ex.reps);
               const exceeded = s.reps && parseInt(s.reps) > high;
               const value = s.weight
-                ? `${esc(s.weight)} kg × ${esc(s.reps || '—')} Wdh.`
+                ? `${esc(num(s.weight))} kg × ${esc(s.reps || '—')} Wdh.`
                 : `${esc(s.reps)} Wdh.`;
               return `<div class="history-entry">
                 <span class="history-date">Satz ${i+1}</span>
@@ -3296,7 +3311,7 @@ function renderDayInner() {
                   ? `Noch unter ${suggestion.low} Wdh. – Gewicht halten`
                   : `Ziel ${suggestion.low}–${suggestion.high} noch nicht voll – Gewicht halten`
             }</div>
-            ${targets.some(t => t.reps !== '') ? `<div class="sugg-detail" style="font-style:normal;color:var(--text)">Ziel heute: ${esc(suggestion.weight)} kg × ${targets.map(t => t.reps).join(' · ')} Wdh.</div>` : ''}` : ''}
+            ${targets.some(t => t.reps !== '') ? `<div class="sugg-detail" style="font-style:normal;color:var(--text)">Ziel heute: ${esc(num(suggestion.weight))} kg × ${targets.map(t => t.reps).join(' · ')} Wdh.</div>` : ''}` : ''}
           </div>
         `;
       }
@@ -3755,7 +3770,7 @@ function showTimerNextInfo(ei, s) {
   inputsEl.innerHTML = `
     <div style="text-align:center">
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:3px">GEWICHT</div>
-      <input type="number" id="timer-next-weight" value="${esc(defaultWeight)}" placeholder="${esc(suggestion?.weight || '—')}" style="width:72px">
+      <input type="number" id="timer-next-weight" value="${esc(defaultWeight)}" placeholder="${esc(suggestion?.weight ? num(suggestion.weight) : '—')}" style="width:72px">
     </div>
     <div style="text-align:center">
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:3px">WDH.</div>
@@ -4001,9 +4016,12 @@ function updateProgressBars(ei) {
 // gespeichert und fehlte danach in Verlauf, Rekorden und Vorschlägen.
 function fillFromPlaceholder(inputId, set, field) {
   const el = document.getElementById(inputId);
-  if (!el || el.value || !/^\d+(\.\d+)?$/.test(el.placeholder)) return;
-  el.value = el.placeholder;
-  set[field] = el.placeholder;
+  // Platzhalter steht in deutscher Schreibweise ("87,5") – gespeichert und
+  // im Zahlenfeld wird der Punkt gebraucht
+  const v = (el?.placeholder || '').replace(',', '.');
+  if (!el || el.value || !/^\d+(\.\d+)?$/.test(v)) return;
+  el.value = v;
+  set[field] = v;
 }
 
 function toggleDone(ei, s) {
@@ -4062,7 +4080,7 @@ function toggleDone(ei, s) {
         .map(st => parseFloat(st.weight) || 0));
       // pr > 0: beim allerersten Training einer Übung gibt es keinen Rekord zu brechen
       if (pr > 0 && weight > pr && weight > todayBest) {
-        showPRCelebration(`🏆 Neuer Rekord! ${weight} kg`);
+        showPRCelebration(`🏆 Neuer Rekord! ${num(weight)} kg`);
       } else {
         // Kein Gewichtsrekord, aber vielleicht mehr Wiederholungen als je
         // zuvor auf diesem Niveau – gemessen am geschätzten 1RM.
@@ -4071,7 +4089,7 @@ function toggleDone(ei, s) {
         const prevBest = Math.max(
           getBestE1rmById(displayId, displayName, getKey(DAYS[currentDay].id, activeDateStr())),
           bestE1rm(sessionData[ei].sets.filter((st, i) => i !== s && st.done)));
-        if (prevBest > 0 && est > prevBest) showPRCelebration(`🏆 Bestleistung! ${cur.weight} kg × ${cur.reps} (≈ ${est} kg 1RM)`);
+        if (prevBest > 0 && est > prevBest) showPRCelebration(`🏆 Bestleistung! ${num(cur.weight)} kg × ${cur.reps} (≈ ${num(est)} kg 1RM)`);
       }
     }
 
@@ -4468,7 +4486,7 @@ function renderExercisesInner() {
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          ${bestDisplay ? `<div style="font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:500">${bestDisplay.value} ${bestDisplay.unit}</div><div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-top:2px">Bestleistung</div>` : `<div style="font-family:var(--mono);font-size:13px;color:var(--muted2)">—</div>`}
+          ${bestDisplay ? `<div style="font-family:var(--mono);font-size:13px;color:var(--accent);font-weight:500">${num(bestDisplay.value)} ${bestDisplay.unit}</div><div style="font-family:var(--mono);font-size:12px;color:var(--muted2);margin-top:2px">Bestleistung</div>` : `<div style="font-family:var(--mono);font-size:13px;color:var(--muted2)">—</div>`}
         </div>
         <svg class="ex-chevron" style="width:16px;height:16px;margin-left:8px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
@@ -4518,11 +4536,11 @@ function showExerciseDetail(exerciseId, exerciseName) {
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:16px 0">
       <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
-        <div style="font-family:var(--sans);font-size:24px;font-weight:700;color:var(--accent)">${bestDisplay ? bestDisplay.value : '—'}</div>
+        <div style="font-family:var(--sans);font-size:24px;font-weight:700;color:var(--accent)">${bestDisplay ? num(bestDisplay.value) : '—'}</div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Bestleistung (${bestDisplay ? bestDisplay.unit : 'kg'})</div>
       </div>
       <div style="background:var(--bg3);border-radius:8px;padding:12px;text-align:center">
-        <div style="font-family:var(--sans);font-size:24px;font-weight:700;color:var(--accent)">${lastDisplay ? lastDisplay.value : '—'}</div>
+        <div style="font-family:var(--sans);font-size:24px;font-weight:700;color:var(--accent)">${lastDisplay ? num(lastDisplay.value) : '—'}</div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:0.06em">Zuletzt (${lastDisplay ? lastDisplay.unit : 'kg'})</div>
       </div>
       ${bestE1 > 0 ? `
@@ -4532,8 +4550,8 @@ function showExerciseDetail(exerciseId, exerciseName) {
           <div style="font-size:12px;color:var(--muted);margin-top:2px">Macht Sätze mit unterschiedlichen Wdh. vergleichbar</div>
         </div>
         <div style="text-align:right;white-space:nowrap">
-          <div style="font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent)">${bestE1} kg</div>
-          ${lastE1 > 0 ? `<div style="font-size:12px;color:var(--muted)">zuletzt ${lastE1} kg</div>` : ''}
+          <div style="font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent)">${num(bestE1)} kg</div>
+          ${lastE1 > 0 ? `<div style="font-size:12px;color:var(--muted)">zuletzt ${num(lastE1)} kg</div>` : ''}
         </div>
       </div>` : ''}
       ${profileText ? `
@@ -4866,8 +4884,8 @@ function renderStatsInner() {
           <button onclick="showBWInput()" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--accent);font-family:var(--mono);font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer">+ Eintrag</button>
         </div>
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-          <span style="font-family:var(--sans);font-size:28px;font-weight:700;color:var(--accent)">${weights[weights.length-1].toFixed(1)} kg</span>
-          ${trend !== 0 ? `<span style="font-family:var(--mono);font-size:13px;color:${trendColor}">${trend > 0 ? '+' : ''}${trend.toFixed(1)} kg</span>` : ''}
+          <span style="font-family:var(--sans);font-size:28px;font-weight:700;color:var(--accent)">${num(weights[weights.length-1], 1)} kg</span>
+          ${trend !== 0 ? `<span style="font-family:var(--mono);font-size:13px;color:${trendColor}">${trend > 0 ? '+' : ''}${num(trend, 1)} kg</span>` : ''}
         </div>
         ${bwSparkline(bwHistory, 280, 56)}
         <div style="display:flex;justify-content:space-between;margin-top:4px">
@@ -4949,11 +4967,11 @@ function renderStatsInner() {
     <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:14px;margin-bottom:12px">
       <div style="font-family:var(--mono);font-size:12px;color:var(--muted2);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Trainingsvolumen</div>
       <div style="display:flex;align-items:flex-end;gap:4px;height:48px">
-        ${volumeEntries.map(([date,vol],i) => { const pct=Math.round((vol/maxVolume)*100); const isLast=i===volumeEntries.length-1; return `<div style="flex:1;background:${isLast?'var(--accent)':'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px" title="${Math.round(vol).toLocaleString()} kg"></div>`; }).join('')}
+        ${volumeEntries.map(([date,vol],i) => { const pct=Math.round((vol/maxVolume)*100); const isLast=i===volumeEntries.length-1; return `<div style="flex:1;background:${isLast?'var(--accent)':'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px" title="${num(Math.round(vol))} kg"></div>`; }).join('')}
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:4px">
         <span style="font-family:var(--mono);font-size:12px;color:var(--muted2)">${formatDate(volumeEntries[0][0])}</span>
-        <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">${Math.round(volumeEntries[volumeEntries.length-1][1]).toLocaleString()} kg</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">${num(Math.round(volumeEntries[volumeEntries.length-1][1]))} kg</span>
       </div>
     </div>` : ''}
 
@@ -4965,14 +4983,14 @@ function renderStatsInner() {
         <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <span style="font-size:12px;font-weight:500;color:var(--text)">${esc(ex.name)}</span>
-            <span style="font-family:var(--mono);font-size:13px;color:${ex.diff>0?'var(--accent)':'var(--muted)'}">${ex.diff>0?'+':''}${ex.diff} kg</span>
+            <span style="font-family:var(--mono);font-size:13px;color:${ex.diff>0?'var(--accent)':'var(--muted)'}">${ex.diff>0?'+':''}${num(ex.diff)} kg</span>
           </div>
           <div style="display:flex;align-items:flex-end;gap:3px;height:28px">
             ${ex.last6.map((e,i)=>{ const maxW=Math.max(...ex.last6.map(x=>x.weight)); const pct=maxW>0?Math.round((e.weight/maxW)*100):0; const isLast=i===ex.last6.length-1; return `<div style="flex:1;background:${isLast?'var(--accent)':'var(--bg4)'};border-radius:2px 2px 0 0;height:${pct}%;min-height:4px"></div>`; }).join('')}
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:4px">
-            <span style="font-family:var(--mono);font-size:12px;color:var(--muted2)">${ex.first} kg</span>
-            <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">${ex.last} kg</span>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--muted2)">${num(ex.first)} kg</span>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">${num(ex.last)} kg</span>
           </div>
         </div>
       `).join('')}
@@ -4985,7 +5003,7 @@ function renderStatsInner() {
       ${Object.entries(bestLifts).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([name,weight])=>`
         <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--border)">
           <span style="font-size:12px;color:var(--text)">${esc(name)}</span>
-          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${weight} kg</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${num(weight)} kg</span>
         </div>
       `).join('')}
     </div>` : ''}
@@ -5111,7 +5129,7 @@ function renderHomeInner() {
           ${entries.map(e => `
             <div class="home-last-ex">
               <span class="home-last-ex-name">${esc(e.name)}</span>
-              <span class="home-last-ex-val">${e.weight} ${e.unit || 'kg'}</span>
+              <span class="home-last-ex-val">${num(e.weight)} ${e.unit || 'kg'}</span>
             </div>
           `).join('')}
         </div>
@@ -5177,7 +5195,7 @@ function renderHomeInner() {
   const storageWarn = storageKB >= CLOUD_LIMIT_KB * 0.75 ? `
     <div class="home-card" style="border-color:color-mix(in srgb, var(--red) 35%, transparent);background:color-mix(in srgb, var(--red) 5%, transparent)">
       <div class="home-card-title" style="color:var(--red)">⚠ Cloud-Speicher fast voll</div>
-      <div style="font-size:13px;color:var(--text);line-height:1.5">${storageKB.toFixed(0)} von ${CLOUD_LIMIT_KB} KB belegt. Ist das Limit erreicht, landen neue Einheiten nur noch lokal auf diesem Gerät.</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5">${num(storageKB, 0)} von ${CLOUD_LIMIT_KB} KB belegt. Ist das Limit erreicht, landen neue Einheiten nur noch lokal auf diesem Gerät.</div>
     </div>` : '';
 
   // Backup-Erinnerung: alle 14 Tage, sobald es Einheiten gibt
@@ -5219,7 +5237,7 @@ function renderHomeInner() {
       <div class="home-card-title">Körpergewicht</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:${bwHistory.length > 1 ? '12px' : '0'}">
         <div style="flex:1">
-          <div style="font-family:var(--sans);font-size:28px;font-weight:700;color:var(--accent)">${latestBW ? parseFloat(latestBW).toFixed(1) + ' kg' : '—'}</div>
+          <div style="font-family:var(--sans);font-size:28px;font-weight:700;color:var(--accent)">${latestBW ? num(latestBW, 1) + ' kg' : '—'}</div>
           ${latestBW ? `<div style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:2px">${formatDate(bwKeys[0].split(':')[2])}</div>` : '<div style="font-family:var(--mono);font-size:12px;color:var(--muted)">Noch kein Eintrag</div>'}
         </div>
         <button onclick="showBWInput()" style="background:var(--bg3);border:0.5px solid var(--border2);color:var(--accent);font-family:var(--mono);font-size:18px;font-weight:600;width:40px;height:40px;border-radius:10px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
@@ -5228,7 +5246,7 @@ function renderHomeInner() {
         const weights = bwHistory.map(e => e.weight);
         const trend = weights[weights.length-1] - weights[0];
         const trendColor = trend < 0 ? 'var(--green)' : trend > 0 ? '#e87f7f' : 'var(--muted)';
-        const trendStr = (trend > 0 ? '+' : '') + trend.toFixed(1) + ' kg';
+        const trendStr = (trend > 0 ? '+' : '') + num(trend, 1) + ' kg';
         return `<div style="position:relative">
           ${bwSparkline(bwHistory, 260, 48)}
           <div style="display:flex;justify-content:space-between;margin-top:4px">
@@ -5279,7 +5297,7 @@ function renderHomeInner() {
       ${topPRs.map(([name, w]) => `
         <div class="home-pr-row">
           <span style="font-size:12px;color:var(--text)">${esc(name)}</span>
-          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${w} kg</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--accent);font-weight:500">${num(w)} kg</span>
         </div>
       `).join('')}
     </div>
@@ -5530,7 +5548,7 @@ function updateMenuSyncInfo() {
   const col = pct >= 90 ? 'var(--red)' : pct >= 75 ? 'var(--legs)' : 'var(--accent)';
   box.innerHTML = `
     <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--muted2);margin-bottom:5px">
-      <span>Cloud-Speicher</span><span style="color:${col}">${kb.toFixed(1)} / ${CLOUD_LIMIT_KB} KB</span>
+      <span>Cloud-Speicher</span><span style="color:${col}">${num(kb, 1)} / ${CLOUD_LIMIT_KB} KB</span>
     </div>
     <div style="height:4px;background:var(--bg4);border-radius:2px;overflow:hidden">
       <div style="height:100%;width:${pct}%;background:${col}"></div>
