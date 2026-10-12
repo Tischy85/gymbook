@@ -195,6 +195,11 @@
   .warmup-row .set-input { font-size: 15px; padding-top: 7px; padding-bottom: 7px; }
   .warmup-row .check-btn { width: 28px; height: 28px; }
   .stag-hint { font-size: 12px; color: var(--legs); margin-top: 4px; }
+  /* Supersatz: zwei Karten in einem gemeinsamen Rahmen */
+  .superset-group { border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 16px; padding: 6px 6px 0; margin-bottom: 10px; }
+  .superset-group .exercise-card { margin-bottom: 6px; }
+  .superset-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 6px 6px; font-size: 12px; font-weight: 600; color: var(--accent); }
+  .superset-head button { background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 2px 4px; }
   #timer-next-info { margin-bottom: 10px; text-align: center; }
   #timer-next-label { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   #timer-next-inputs { display: flex; gap: 10px; justify-content: center; }
@@ -1393,11 +1398,13 @@ function loadSessionData() {
   sessionData = {};
   swappedExercises = {};
   swappedExerciseIds = {};
+  sessionSupersets = null;
   if (existing) {
     if (existing.sets) {
       sessionData = existing.sets;
       swappedExercises = existing.swapped || {};
       swappedExerciseIds = existing.swappedIds || {};
+      sessionSupersets = Array.isArray(existing.supersets) ? existing.supersets : null;
     } else {
       sessionData = existing;
     }
@@ -1449,6 +1456,7 @@ function saveSession() {
   storageSet(getKey(day.id, date), {
     sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds,
     meta: slotMeta, startedAt,
+    ...(Array.isArray(sessionSupersets) ? { supersets: sessionSupersets } : {}),
     ...(prev.completed ? { completed: true } : {}),
     ...(prev.durationMin ? { durationMin: prev.durationMin, setsDone: prev.setsDone } : {})
   });
@@ -2136,13 +2144,23 @@ function applyPlanEditRemaps(remaps) {
       newToOld.forEach((oi, ni) => { if (oi >= 0 && obj && obj[oi] !== undefined) out[ni] = obj[oi]; });
       return out;
     };
-    storageSet(key, {
+    const updated = {
       ...raw,
       sets: remap(raw.sets),
       swapped: remap(raw.swapped || {}),
       swappedIds: remap(raw.swappedIds || {}),
       meta: remap(raw.meta || {})
-    });
+    };
+    // Supersätze dieser Einheit auf die neuen Positionen umrechnen; Paare mit
+    // einer gelöschten Übung fallen weg
+    if (Array.isArray(raw.supersets)) {
+      const oldToNew = i => newToOld.indexOf(i);
+      updated.supersets = raw.supersets
+        .map(([a, b]) => [oldToNew(a), oldToNew(b)])
+        .filter(([a, b]) => a >= 0 && b >= 0)
+        .map(([a, b]) => [Math.min(a, b), Math.max(a, b)]);
+    }
+    storageSet(key, updated);
   });
 }
 
@@ -2189,6 +2207,8 @@ async function saveCustomPlan() {
       const stepEl = document.getElementById(`edit-step-${di}-${ei}`);
       const warmEl = document.getElementById(`edit-warmup-${di}-${ei}`);
       if (warmEl) editDraft[di].exercises[ei].warmup = warmEl.value === '' ? undefined : parseInt(warmEl.value, 10);
+      const ssEl = document.getElementById(`edit-ss-${di}-${ei}`);
+      if (document.getElementById(`edit-sets-${di}-${ei}`)) editDraft[di].exercises[ei].superset = !!ssEl?.checked;
       if (setsEl) editDraft[di].exercises[ei].sets = parseInt(setsEl.value) || ex.sets;
       if (repsEl) editDraft[di].exercises[ei].reps = repsEl.value || ex.reps;
       if (pauseEl) editDraft[di].exercises[ei].pause = pauseEl.value || ex.pause;
@@ -2207,6 +2227,8 @@ async function saveCustomPlan() {
       if (ex.step) DAYS[di].exercises[ei].step = ex.step;
       if (Number.isInteger(ex.warmup)) DAYS[di].exercises[ei].warmup = ex.warmup;
       else delete DAYS[di].exercises[ei].warmup;          // zurück auf "Auto"
+      if (ex.superset) DAYS[di].exercises[ei].superset = true;
+      else delete DAYS[di].exercises[ei].superset;
     });
   });
 
@@ -2815,6 +2837,11 @@ function renderEditDay() {
               ${[0,1,2,3].map(n => `<option value="${n}" ${ex.warmup===n?'selected':''}>${n}</option>`).join('')}
             </select>
           </div>
+          ${ei < day.exercises.length - 1 ? `
+          <label class="edit-field" style="grid-column:1/-1;flex-direction:row;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-ss-${di}-${ei}" ${ex.superset ? 'checked' : ''} style="width:auto">
+            <span style="font-size:13px;color:var(--text)">⛓ Mit der nächsten Übung als Supersatz</span>
+          </label>` : ''}
         </div>
       </div>
     `;
@@ -2946,7 +2973,17 @@ function renderDayInner() {
     </div>
   `;
 
-  day.exercises.forEach((ex, ei) => {
+  displayOrder(day).forEach(ei => {
+    const ex = day.exercises[ei];
+    const ss = supersetInfo(day, ei);
+    // Supersatz: beide Karten in einem gemeinsamen Rahmen
+    if (ss?.first) {
+      html += `<div class="superset-group">
+        <div class="superset-head">
+          <span>⛓ Supersatz · Pause nach beiden</span>
+          <button onclick="setSessionSupersets(supersetPairs(DAYS[currentDay]).filter(([a]) => a !== ${ei}))">Auflösen</button>
+        </div>`;
+    }
     const sd = sessionData[ei] || { sets: [] };
     const swappedName = swappedExercises[ei] || null;
     const displayName = swappedName || ex.name;
@@ -3008,6 +3045,7 @@ function renderDayInner() {
         </div>
         <div class="exercise-body" id="exbody-${ei}">
           <div style="display:flex;justify-content:flex-end;margin-bottom:8px;gap:6px;flex-wrap:wrap">
+            <button class="swap-btn ${ss ? 'active' : ''}" onclick="event.stopPropagation();openSupersetPicker(${ei})">${ss ? '⛓ Supersatz lösen' : '⛓ Supersatz'}</button>
             <button class="swap-btn ${swappedName ? 'active' : ''}" onclick="event.stopPropagation();openCatalog(${ei})">⇄ Übung tauschen</button>
             ${swappedName ? `<button class="swap-btn" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();resetSwap(${ei})">↺ Zurücksetzen</button>` : ''}
             ${skipData
@@ -3132,6 +3170,7 @@ function renderDayInner() {
     }
 
     html += `</div></div>`;
+    if (ss && !ss.first) html += `</div>`;   // Supersatz-Rahmen schließen
   });
 
   document.getElementById('main-content').innerHTML = html;
@@ -3219,6 +3258,116 @@ function toggleWarmup(ei, k) {
   autoSave();
 }
 
+// ── SUPERSÄTZE ────────────────────────────────────────────────
+// Zwei Übungen im Wechsel: Satz A → kurzer Wechsel → Satz B → volle Pause →
+// nächster Satz A … Festlegbar auf zwei Wegen:
+//   • im Plan: Übung "mit nächster Übung als Supersatz" (ex.superset)
+//   • nur für die aktuelle Einheit, direkt im Training (sessionSupersets)
+// Sobald im Training etwas geändert wird, gilt für DIESE Einheit nur noch
+// die eigene Liste – der Plan bleibt unverändert.
+const SUPERSET_SWITCH_SEC = 15;      // Wechselzeit zwischen den beiden Übungen
+let sessionSupersets = null;         // null = Plan-Vorgabe, sonst [[a, b], …]
+
+function planSupersetPairs(day) {
+  const pairs = [], used = new Set();
+  day.exercises.forEach((ex, i) => {
+    if (ex.superset && i + 1 < day.exercises.length && !used.has(i) && !used.has(i + 1)) {
+      pairs.push([i, i + 1]); used.add(i); used.add(i + 1);
+    }
+  });
+  return pairs;
+}
+
+function supersetPairs(day) {
+  const pairs = Array.isArray(sessionSupersets) ? sessionSupersets : planSupersetPairs(day);
+  return pairs.filter(([a, b]) => day.exercises[a] && day.exercises[b]);
+}
+
+// { partner, first } für eine Übung im Supersatz, sonst null
+function supersetInfo(day, ei) {
+  for (const [a, b] of supersetPairs(day)) {
+    if (ei === a) return { partner: b, first: true };
+    if (ei === b) return { partner: a, first: false };
+  }
+  return null;
+}
+
+// Anzeige-Reihenfolge: Supersatz-Partner direkt hintereinander, auch wenn
+// sie im Plan nicht nebeneinander stehen. Die Indizes (ei) bleiben dabei
+// unverändert – nur die Reihenfolge auf dem Bildschirm ändert sich.
+function displayOrder(day) {
+  const order = [], placed = new Set();
+  day.exercises.forEach((_, ei) => {
+    if (placed.has(ei)) return;
+    order.push(ei); placed.add(ei);
+    const ss = supersetInfo(day, ei);
+    if (ss && !placed.has(ss.partner)) { order.push(ss.partner); placed.add(ss.partner); }
+  });
+  return order;
+}
+
+// Wohin geht es nach Satz s von Übung ei? { ei, s, superset?, newExercise? }
+//   superset 'switch': von A zu B (nur kurzer Wechsel)
+//   superset 'round' : von B zurück zu A (volle Pause)
+function nextSetAfter(ei, s) {
+  const day = DAYS[currentDay];
+  const setsOf = i => sessionData[i]?.activeSets ?? day.exercises[i].sets;
+  const open = (i, k) => k < setsOf(i) && !sessionData[i]?.skipped && !sessionData[i]?.sets?.[k]?.done;
+  const ss = supersetInfo(day, ei);
+  if (ss && !sessionData[ss.partner]?.skipped) {
+    if (ss.first && open(ss.partner, s)) return { ei: ss.partner, s, superset: 'switch' };
+    if (!ss.first && open(ss.partner, s + 1)) return { ei: ss.partner, s: s + 1, superset: 'round' };
+  }
+  if (s + 1 < setsOf(ei)) return { ei, s: s + 1 };
+  // Nächste Übung in Anzeige-Reihenfolge (übersprungene auslassen)
+  const order = displayOrder(day);
+  for (let p = order.indexOf(ei) + 1; p < order.length; p++) {
+    const j = order[p];
+    if (ss && j === ss.partner) continue;
+    if (!sessionData[j]?.skipped) return { ei: j, s: 0, newExercise: true };
+  }
+  return null;
+}
+
+function setSessionSupersets(pairs, reopen) {
+  sessionSupersets = pairs;
+  autoSave();
+  renderDay();
+  if (reopen != null) reopenCard(reopen);
+}
+
+// Knopf "⛓ Supersatz" in der Übungskarte: Partner wählen bzw. auflösen
+function openSupersetPicker(ei) {
+  const day = DAYS[currentDay];
+  if (supersetInfo(day, ei)) {
+    setSessionSupersets(supersetPairs(day).filter(([a, b]) => a !== ei && b !== ei), ei);
+    return;
+  }
+  const options = day.exercises
+    .map((ex, j) => ({ j, name: swappedExercises[j] || ex.name }))
+    .filter(o => o.j !== ei && !supersetInfo(day, o.j) && !sessionData[o.j]?.skipped);
+  document.getElementById('modal-content').innerHTML = `
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <h2>Supersatz</h2>
+    <div style="font-size:13px;color:var(--muted);margin:-6px 0 14px;line-height:1.5">
+      <b>${esc(swappedExercises[ei] || day.exercises[ei].name)}</b> im Wechsel mit … <br>
+      Gilt nur für diese Einheit. Dauerhaft: im Plan-Editor.
+    </div>
+    ${options.length ? options.map(o => `
+      <div class="cat-ex-row" onclick="pairSuperset(${ei}, ${o.j})" style="padding-left:4px;padding-right:4px">
+        <span class="cat-ex-name">${esc(o.name)}</span><span class="cat-ex-arrow">⛓</span>
+      </div>`).join('') : '<div style="color:var(--muted);font-size:14px">Keine freie Übung mehr an diesem Tag.</div>'}
+  `;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function pairSuperset(a, b) {
+  closeModal();
+  const pairs = supersetPairs(DAYS[currentDay]).slice();
+  pairs.push([Math.min(a, b), Math.max(a, b)]);
+  setSessionSupersets(pairs, Math.min(a, b));
+}
+
 function parseRepRange(repsStr) {
   const parts = repsStr.split(/[–\-]/);
   if (parts.length === 2) return { low: parseInt(parts[0]), high: parseInt(parts[1]) };
@@ -3301,7 +3450,8 @@ function getRemainingSeconds() {
 }
 
 
-async function startTimer(seconds, exerciseName, ei, s) {
+// label: eigener Titel statt "PAUSE · NAME" (z. B. beim Supersatz-Wechsel)
+async function startTimer(seconds, exerciseName, ei, s, label) {
   clearInterval(timerInterval);
   timerTotal = seconds;
   timerStartTime = Date.now();
@@ -3309,7 +3459,7 @@ async function startTimer(seconds, exerciseName, ei, s) {
   timerPausedAt = null;
   timerExerciseName = exerciseName;
 
-  document.getElementById('timer-label').textContent = `PAUSE · ${exerciseName.toUpperCase()}`;
+  document.getElementById('timer-label').textContent = label || `PAUSE · ${exerciseName.toUpperCase()}`;
   document.getElementById('timer-pause-btn').textContent = 'Pause';
   document.getElementById('timer-overlay').style.display = 'flex';
   document.getElementById('timer-progress').style.stroke = 'var(--accent)';
@@ -3346,26 +3496,16 @@ function setRir(ei, s, v) {
 
 function showTimerNextInfo(ei, s) {
   const day = DAYS[currentDay];
-  const ex = day.exercises[ei];
-  if (!ex) return;
+  if (!day.exercises[ei]) return;
 
-  const activeSets = sessionData[ei]?.activeSets ?? ex.sets;
-  const nextS = s + 1;
-  let nextEi = ei;
-  let nextSet = nextS;
-  let isNextExercise = false;
-
-  if (nextS >= activeSets) {
-    nextEi = ei + 1;
-    nextSet = 0;
-    isNextExercise = true;
-  }
-
-  const nextEx = day.exercises[nextEi];
-  if (!nextEx) {
+  // Nächster Satz – bei Supersätzen abwechselnd zwischen beiden Übungen
+  const nxt = nextSetAfter(ei, s);
+  if (!nxt) {
     document.getElementById('timer-next-info').style.display = 'none';
     return;
   }
+  const nextEi = nxt.ei, nextSet = nxt.s, isNextExercise = !!nxt.newExercise;
+  const nextEx = day.exercises[nextEi];
 
   const nextName = swappedExercises[nextEi] || nextEx.name;
   const nextId = swappedExerciseIds[nextEi] || nextEx.id || slugify(nextEx.name);
@@ -3384,7 +3524,7 @@ function showTimerNextInfo(ei, s) {
   const activeSetsNext = sessionData[nextEi]?.activeSets ?? nextEx.sets;
   labelEl.textContent = isNextExercise
     ? `Nächste Übung: ${nextName}`
-    : `Satz ${nextSet + 1} von ${activeSets}: ${nextName}`;
+    : `${nxt.superset ? '⛓ ' : ''}Satz ${nextSet + 1} von ${activeSetsNext}: ${nextName}`;
 
   inputsEl.innerHTML = `
     <div style="text-align:center">
@@ -3542,7 +3682,9 @@ function calcTrainingEnd() {
     // Fallback ohne Messwerte: Ausführung + Pause, aber die Pause NACH dem
     // letzten Satz einer Übung zählt nicht mit – danach geht es direkt weiter.
     const displayName = swappedExercises[ei] || ex.name;
-    const pauseSec = defaultPauseOverrides[displayName] || parsePause(ex.pause);
+    // Supersatz: nach Übung A nur der kurze Wechsel, die Pause zählt bei B
+    const ss = supersetInfo(day, ei);
+    const pauseSec = ss?.first ? SUPERSET_SWITCH_SEC : (defaultPauseOverrides[displayName] || parsePause(ex.pause));
     const setTimeSec = 40;
     fallbackSeconds += remaining * setTimeSec + Math.max(0, remaining - 1) * pauseSec;
   });
@@ -3715,12 +3857,22 @@ function toggleDone(ei, s) {
   updateTrainingEnd();
 
   if (done && timerEnabled) {
-    const ex = DAYS[currentDay].exercises[ei];
+    const day = DAYS[currentDay];
+    const ex = day.exercises[ei];
     const displayName = swappedExercises[ei] || ex.name;
-    const seconds = defaultPauseOverrides[displayName] || parsePause(ex.pause);
+    const pauseOf = i => defaultPauseOverrides[swappedExercises[i] || day.exercises[i].name] || parsePause(day.exercises[i].pause);
+    const nxt = nextSetAfter(ei, s);
+    const ss = supersetInfo(day, ei);
     unlockAudio();
-    startTimer(seconds, displayName, ei, s);
-    runTimerShortcut(seconds);
+    if (nxt?.superset === 'switch') {
+      // Supersatz A → B: nur kurzer Wechsel, kein iPhone-Timer
+      startTimer(SUPERSET_SWITCH_SEC, displayName, ei, s, `WECHSEL → ${(swappedExercises[nxt.ei] || day.exercises[nxt.ei].name).toUpperCase()}`);
+    } else {
+      // Nach einer Supersatz-Runde gilt die längere der beiden Pausen
+      const seconds = ss ? Math.max(pauseOf(ei), pauseOf(ss.partner)) : pauseOf(ei);
+      startTimer(seconds, displayName, ei, s);
+      runTimerShortcut(seconds);
+    }
   } else if (!done) {
     closeTimer();
   }
