@@ -269,8 +269,11 @@
   .session-note-input::placeholder { color: var(--muted2); }
 
   /* PLAN-EDITOR */
-  .edit-mode-bar { background: color-mix(in srgb, var(--accent) 8%, transparent); border: 0.5px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .edit-mode-label { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: 0; text-transform: none; }
+  /* Auf schmalen Bildschirmen rutschen die Knöpfe in eine eigene Zeile
+     (vorher ragte "Plan speichern" über den Rand) */
+  .edit-mode-bar { background: color-mix(in srgb, var(--accent) 8%, transparent); border: 0.5px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .edit-mode-label { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: 0; text-transform: none; flex: 1 1 180px; }
+  .edit-mode-bar > div { margin-left: auto; }
   .edit-card { margin-bottom: 8px; overflow: hidden; }
   .edit-card-header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 0.5px solid var(--border); }
   .edit-ex-num { font-family: var(--mono); font-size: 12px; color: var(--muted2); width: 18px; flex-shrink: 0; }
@@ -1039,7 +1042,7 @@ function adoptCloudState(data, at) {
   loadActivePlan();
   loadCustomPlan();
   loadCustomCatalog();
-  loadPauseSettings();
+  removeLegacyPauseOverrides();
 }
 
 function renderAfterSync() {
@@ -3008,15 +3011,19 @@ function saveCustomCatalog() {
   storageSet('gymbook:customcatalog', catalogData);
 }
 
-// Default pause time setting
-// Pausenzeit-Overrides pro Übung. Werden nur noch GELESEN (Altdaten aus einer
-// früheren Version, in der ein Timer-Adjust die Pause dauerhaft überschrieb).
-// Ohne Eintrag greift die Pause aus dem Plan.
-let defaultPauseOverrides = {}; // exerciseName -> seconds
-
-function loadPauseSettings() {
-  const saved = storageGet('gymbook:pausesettings');
-  if (saved) defaultPauseOverrides = typeof saved === 'string' ? JSON.parse(saved) : saved;
+// Pausen-Überschreibungen einer früheren Version (Timer-+/− änderte die Pause
+// dauerhaft) hatten im Timer Vorrang vor dem Plan – im Plan geänderte Pausen
+// wirkten dann nicht. Jetzt gilt nur noch der Plan; der Altbestand wird
+// einmalig entfernt, auch aus der Cloud (über die Löschliste).
+function removeLegacyPauseOverrides() {
+  const key = 'gymbook:pausesettings';
+  let local = null;
+  try { local = localStorage.getItem(key); } catch(e) {}
+  if (storageGet(key) === null && local === null) return;
+  delete cloudData[key];
+  try { localStorage.removeItem(key); } catch(e) {}
+  markDeletedKeys([key]);
+  schedulePush();
 }
 
 function openEditCatalog(di, ei) {
@@ -3963,7 +3970,7 @@ function repDrop(sets) {
 //   'type' – Plan weicht stark von der Empfehlung ab, Daten sprechen nicht dagegen
 // actual = tatsächlich gemessene Pause (Schnitt), sofern vorhanden
 function learnPause(exerciseId, exerciseName, ex) {
-  const planned = defaultPauseOverrides[exerciseName] || parsePause(ex.pause);
+  const planned = parsePause(ex.pause);
   const rec = recommendedPause(ex, exerciseName);
   const date = activeDateStr(), seen = new Set(), sessions = [];
   for (const e of getExerciseEntries(exerciseId, exerciseName)) {
@@ -4026,12 +4033,6 @@ function recordRest(ei, s) {
 function applyPauseTip(ei, sec) {
   const planLen = DAYS[currentDay].exercises.length;
   autoSave();
-  // Alte Pausen-Überschreibung (frühere Version) würde die neue Pause verdecken
-  const name = curDay().exercises[ei].name;
-  if (defaultPauseOverrides[name]) {
-    delete defaultPauseOverrides[name];
-    storageSet('gymbook:pausesettings', defaultPauseOverrides);
-  }
   if (ei >= planLen) {
     sessionExtras[ei - planLen].pause = formatPause(sec);
     saveSession();
@@ -4302,7 +4303,7 @@ function calcTrainingEnd() {
     const displayName = swappedExercises[ei] || ex.name;
     // Supersatz: nach Übung A nur der kurze Wechsel, die Pause zählt bei B
     const ss = supersetInfo(day, ei);
-    const pauseSec = ss?.first ? SUPERSET_SWITCH_SEC : (defaultPauseOverrides[displayName] || parsePause(ex.pause));
+    const pauseSec = ss?.first ? SUPERSET_SWITCH_SEC : parsePause(ex.pause);
     const setTimeSec = 40;
     fallbackSeconds += remaining * setTimeSec + Math.max(0, remaining - 1) * pauseSec;
   });
@@ -4499,7 +4500,7 @@ function toggleDone(ei, s) {
     const day = curDay();
     const ex = day.exercises[ei];
     const displayName = swappedExercises[ei] || ex.name;
-    const pauseOf = i => defaultPauseOverrides[swappedExercises[i] || day.exercises[i].name] || parsePause(day.exercises[i].pause);
+    const pauseOf = i => parsePause(day.exercises[i].pause);
     const nxt = nextSetAfter(ei, s);
     const ss = supersetInfo(day, ei);
     unlockAudio();
@@ -6002,7 +6003,8 @@ window.addEventListener('beforeunload', e => {
   }
 });
 
-// Save custom pause when user adjusts timer
+// Timer im laufenden Satz verlängern/kürzen – nur für diese Pause, der Plan
+// bleibt unverändert
 function adjustTimer(delta) {
   if (timerPaused) {
     timerPausedAt = Math.max(0, timerPausedAt + delta);
@@ -6036,7 +6038,7 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // ohne Netz im Gym zeigte die App den unveränderten Originalplan.
 loadCustomPlan();
 loadCustomCatalog();
-loadPauseSettings();
+removeLegacyPauseOverrides();
 updateTimerLabel();
 renderNav();
 switchTab('home');
