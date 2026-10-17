@@ -3912,7 +3912,18 @@ function parsePause(pauseStr) {
 // Wdh. über die Sätze, darf die Pause kürzer werden; brechen sie trotz
 // eingehaltener Pause ein, länger. Die App schlägt nur vor – geändert wird
 // die Pause erst, wenn der Nutzer "Übernehmen" tippt.
-const SET_WORK_SEC = 40;   // Satzdauer inkl. Eintragen (wie in calcTrainingEnd)
+// Geschätzte Dauer eines Satzes aus seinen Wiederholungen: Einstellen und
+// Greifen + Zeit pro Wdh.; einseitig beide Seiten nacheinander plus Wechsel.
+// 6 Wdh. ≈ 31 s, 15 Wdh. ≈ 63 s, einarmig 12/12 ≈ 99 s.
+const SET_SETUP_SEC = 10, REP_SEC = 3.5, SIDE_SWITCH_SEC = 5;
+const SET_FALLBACK_SEC = 40;   // ohne Wdh.-Angabe (wie in calcTrainingEnd)
+
+function estimateSetSec(set, uni) {
+  const n = v => parseInt(v, 10) || 0;
+  const reps = uni && (set.repsL || set.repsR) ? n(set.repsL) + n(set.repsR) : n(set.reps);
+  if (!reps) return SET_FALLBACK_SEC;
+  return Math.round(SET_SETUP_SEC + (uni ? SIDE_SWITCH_SEC : 0) + reps * REP_SEC);
+}
 const COMPOUND_RE = /presse|drücken|druecken|ruder|latzug|klimmz|kniebeuge|hackenschmidt|kreuzheben|dips|ausfallschritt/i;
 const ISOLATION_RE = /fly|curl|seitheben|strecker|beuger|kickback|trizeps|bizeps|pull-?through|facepull/i;
 const SMALL_RE = /waden|abdukt|addukt|crunch|sit-?up|beinheben/i;
@@ -3990,7 +4001,7 @@ function learnPause(exerciseId, exerciseName, ex) {
 }
 
 // Tatsächliche Pause messen: Abstand zwischen zwei abgehakten Sätzen einer
-// Übung minus Satzdauer. Gespeichert wird je Übung und Einheit nur der
+// Übung minus geschätzte Dauer des gerade beendeten Satzes. Gespeichert wird je Übung und Einheit nur der
 // Schnitt (slot.rest, ganze Sekunden) – spart Platz in der Cloud. Die
 // Einzelwerte leben nur im Arbeitsspeicher.
 let restClock = { key: null, byEi: {} };
@@ -4004,7 +4015,7 @@ function recordRest(ei, s) {
   restClock.byEi[ei] = { at: now, samples };
   // Supersatz: zwischen zwei Sätzen liegt der Satz der anderen Übung – nicht vergleichbar
   if (!prev || s === 0 || !slot.sets[s - 1]?.done || supersetInfo(curDay(), ei)) return;
-  const rest = Math.round((now - prev.at) / 1000 - SET_WORK_SEC);
+  const rest = Math.round((now - prev.at) / 1000 - estimateSetSec(slot.sets[s], isUnilateralSlot(curDay(), ei)));
   if (rest < 20 || rest > 600) return;   // vergessen abzuhaken, App lag offen …
   samples.push(rest);
   slot.rest = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
