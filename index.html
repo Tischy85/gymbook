@@ -195,6 +195,8 @@
   .warmup-row .set-input { font-size: 15px; padding-top: 7px; padding-bottom: 7px; }
   .warmup-row .check-btn { width: 28px; height: 28px; }
   .stag-hint { font-size: 12px; color: var(--legs); margin-top: 4px; }
+  /* Einseitige Übungen: Links/Rechts statt Wdh.-Feld mit Plus/Minus */
+  .sets-header.uni, .set-row.uni { grid-template-columns: 22px 1.2fr 42px 1fr 1fr 36px; }
   /* Supersatz: zwei Karten in einem gemeinsamen Rahmen */
   .superset-group { border: 1.5px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 16px; padding: 6px 6px 0; margin-bottom: 10px; }
   .superset-group .exercise-card { margin-bottom: 6px; }
@@ -1288,6 +1290,7 @@ function compactForCloud(data) {
 // für die Cloud wird eine Einheit kürzer geschrieben:
 //   Sätze als Text    {"weight":"92.5","reps":"7","done":true}  →  "92.5x7*"
 //                     mit RIR {…,"rir":2}                         →  "92.5x7~2*"
+//                     einseitig {…,"repsL":"7","repsR":"8"}       →  "92.5x7@7/8*"
 //   Aufwärmsätze      genauso, im Feld "w" des Slots
 //   Übungsnamen       statt in jeder Einheit einmal in einem Verzeichnis
 // Beim Laden wird alles zurückübersetzt (decodeCloudData). Jede Einheit wird
@@ -1323,11 +1326,16 @@ function encodeSession(v, dict) {
     const toks = [];
     for (const st of arr) {
       if (!st || typeof st !== 'object') return null;
-      if (Object.keys(st).some(k => k !== 'weight' && k !== 'reps' && k !== 'done' && k !== 'rir')) return null;
+      if (Object.keys(st).some(k => !['weight', 'reps', 'done', 'rir', 'repsL', 'repsR'].includes(k))) return null;
       if (typeof st.weight !== 'string' || typeof st.reps !== 'string' || typeof st.done !== 'boolean') return null;
       if (!SET_VALUE_RE.test(st.weight) || !SET_VALUE_RE.test(st.reps)) return null;
       if (st.rir !== undefined && !(Number.isInteger(st.rir) && st.rir >= 0 && st.rir <= 9)) return null;
-      toks.push(st.weight + 'x' + st.reps + (st.rir !== undefined ? '~' + st.rir : '') + (st.done ? '*' : ''));
+      // Einseitig: beide Seiten immer gemeinsam als "@L/R"
+      const hasSides = st.repsL !== undefined || st.repsR !== undefined;
+      if (hasSides && !(typeof st.repsL === 'string' && typeof st.repsR === 'string'
+          && SET_VALUE_RE.test(st.repsL) && SET_VALUE_RE.test(st.repsR))) return null;
+      toks.push(st.weight + 'x' + st.reps + (hasSides ? '@' + st.repsL + '/' + st.repsR : '')
+        + (st.rir !== undefined ? '~' + st.rir : '') + (st.done ? '*' : ''));
     }
     return toks.join(',');
   };
@@ -1377,8 +1385,12 @@ function decodeSession(enc, list) {
     let rir;
     const r = t.indexOf('~');
     if (r >= 0) { rir = parseInt(t.slice(r + 1), 10); t = t.slice(0, r); }
+    let sides;
+    const at = t.indexOf('@');
+    if (at >= 0) { sides = t.slice(at + 1).split('/'); t = t.slice(0, at); }
     const i = t.indexOf('x');
     const st = { weight: t.slice(0, i), reps: t.slice(i + 1), done };
+    if (sides) { st.repsL = sides[0] ?? ''; st.repsR = sides[1] ?? ''; }
     if (rir !== undefined) st.rir = rir;
     return st;
   });
@@ -1605,6 +1617,15 @@ function collectInputValues() {
       if (!sessionData[ei].sets[s]) sessionData[ei].sets[s] = { weight: '', reps: '', done: false };
       if (wEl) sessionData[ei].sets[s].weight = wEl.value;
       if (rEl) sessionData[ei].sets[s].reps = rEl.value;
+      // Einseitige Übung: links/rechts getrennt, "reps" = schwächere Seite
+      const lEl = document.getElementById(`rl-${ei}-${s}`);
+      const rrEl = document.getElementById(`rr-${ei}-${s}`);
+      if (lEl && rrEl) {
+        const set = sessionData[ei].sets[s];
+        set.repsL = lEl.value;
+        set.repsR = rrEl.value;
+        set.reps = sideReps(lEl.value, rrEl.value);
+      }
     }
     // Aufwärmsätze (nur die gerade angezeigten haben Eingabefelder)
     (sessionData[ei]?.warmup || []).forEach((w, k) => {
@@ -1669,8 +1690,12 @@ function formatSet(s, opts) {
   const long = opts && opts.long;
   const rir = s.rir !== undefined ? ` · RIR ${s.rir === 4 ? '4+' : s.rir}` : '';
   const sep = long ? ' kg × ' : 'kg×';
-  if (s.weight) return `${num(s.weight)}${sep}${s.reps || '?'}${long ? ' Wdh.' : ''}${rir}`;
-  return `${s.reps || '?'} Wdh.${rir}`;
+  // Einseitig: beide Seiten zeigen ("L 12 / R 14") statt nur der Wertung
+  const sides = (s.repsL || s.repsR)
+    ? (long ? `L ${s.repsL || '?'} / R ${s.repsR || '?'}` : `L${s.repsL || '?'}/R${s.repsR || '?'}`)
+    : null;
+  if (s.weight) return `${num(s.weight)}${sep}${sides || s.reps || '?'}${long ? ' Wdh.' : ''}${rir}`;
+  return `${sides || s.reps || '?'} Wdh.${rir}`;
 }
 
 // Geschätztes Maximalgewicht für 1 Wiederholung (Epley-Formel). Macht Sätze
@@ -2348,6 +2373,13 @@ async function saveCustomPlan() {
       const stepEl = document.getElementById(`edit-step-${di}-${ei}`);
       const warmEl = document.getElementById(`edit-warmup-${di}-${ei}`);
       if (warmEl) editDraft[di].exercises[ei].warmup = warmEl.value === '' ? undefined : parseInt(warmEl.value, 10);
+      // Einseitig: nur speichern, wenn es von der Automatik ("einarmig" im
+      // Namen) abweicht – so passt es sich bei einem Tausch weiter an
+      const uniEl = document.getElementById(`edit-uni-${di}-${ei}`);
+      if (uniEl) {
+        const auto = UNILATERAL_RE.test(editDraft[di].exercises[ei].name);
+        editDraft[di].exercises[ei].unilateral = uniEl.checked === auto ? undefined : uniEl.checked;
+      }
       const ssEl = document.getElementById(`edit-ss-${di}-${ei}`);
       if (document.getElementById(`edit-sets-${di}-${ei}`)) editDraft[di].exercises[ei].superset = !!ssEl?.checked;
       if (setsEl) editDraft[di].exercises[ei].sets = parseInt(setsEl.value) || ex.sets;
@@ -2370,6 +2402,8 @@ async function saveCustomPlan() {
       else delete DAYS[di].exercises[ei].warmup;          // zurück auf "Auto"
       if (ex.superset) DAYS[di].exercises[ei].superset = true;
       else delete DAYS[di].exercises[ei].superset;
+      if (typeof ex.unilateral === 'boolean') DAYS[di].exercises[ei].unilateral = ex.unilateral;
+      else delete DAYS[di].exercises[ei].unilateral;
     });
   });
 
@@ -2978,6 +3012,10 @@ function renderEditDay() {
               ${[0,1,2,3].map(n => `<option value="${n}" ${ex.warmup===n?'selected':''}>${n}</option>`).join('')}
             </select>
           </div>
+          <label class="edit-field" style="grid-column:1/-1;flex-direction:row;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-uni-${di}-${ei}" ${(typeof ex.unilateral === 'boolean' ? ex.unilateral : UNILATERAL_RE.test(ex.name)) ? 'checked' : ''} style="width:auto">
+            <span style="font-size:13px;color:var(--text)">↔ Einseitig – Wdh. links/rechts getrennt</span>
+          </label>
           ${ei < day.exercises.length - 1 ? `
           <label class="edit-field" style="grid-column:1/-1;flex-direction:row;align-items:center;gap:8px;cursor:pointer">
             <input type="checkbox" id="edit-ss-${di}-${ei}" ${ex.superset ? 'checked' : ''} style="width:auto">
@@ -3149,6 +3187,8 @@ function renderDayInner() {
     // Farbiger Rand nach Muskelgruppe
     const muscleColor = MUSCLE_COLORS[muscleCategory(displayId, displayName, ex.muscle)] || 'var(--muted2)';
     const stagnation = sd.skipped ? null : getStagnation(displayId, displayName);
+    const uni = isUnilateralSlot(day, ei);
+    const imbalance = uni && !sd.skipped ? sideImbalance(displayId, displayName) : null;
 
     // Determine active set count (plan default or user-adjusted)
     const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
@@ -3179,6 +3219,7 @@ function renderDayInner() {
             <div class="progress-dots">${progressDots}</div>
             ${skipData ? `<div style="font-family:var(--mono);font-size:12px;color:var(--red);margin-top:2px">${esc(skipData.reason)}</div>` : ''}
             ${stagnation ? `<div class="stag-hint">⚠ Seit ${stagnation.sessions} Einheiten kein Fortschritt</div>` : ''}
+            ${imbalance ? `<div class="stag-hint" style="color:var(--pull)">↔ ${imbalance.weaker === 'links' ? 'Links' : 'Rechts'} schwächer (−${num(imbalance.diff)} Wdh.) – mit ${imbalance.weaker} beginnen</div>` : ''}
           </div>
           ${suggLabel}
           ${timerExerciseName === displayName && document.getElementById('timer-overlay')?.style.display !== 'none' ? '<span style="font-family:var(--mono);font-size:12px;color:var(--accent);margin-left:4px">⏱</span>' : ''}
@@ -3201,9 +3242,13 @@ function renderDayInner() {
             </div>
           ` : `
           <div class="ex-detail-meta">${esc(ex.muscle)} · ${esc(ex.sets)} Sätze · Pause ${esc(ex.pause)}</div>
+          ${uni ? `
+          <div class="sets-header uni">
+            <span>Satz</span><span>Gewicht</span><span></span><span>Links</span><span>Rechts</span><span></span>
+          </div>` : `
           <div class="sets-header">
             <span>Satz</span><span>Gewicht</span><span></span><span>Wdh.</span><span></span><span></span>
-          </div>
+          </div>`}
           `}
     `;
 
@@ -3244,19 +3289,24 @@ function renderDayInner() {
       const suggWeight = suggestion ? suggestion.weight : '';
       const placeholder = setData.weight ? '' : (suggWeight ? `${suggWeight}` : (lastEntry ? lastEntry[s]?.weight || '—' : '—'));
       const repsPlaceholder = targets[s]?.reps !== '' && targets[s]?.reps != null ? targets[s].reps : ex.reps.split(/[–\-]/)[0];
-      html += `
-        <div class="set-row" id="set-row-${ei}-${s}">
-          <span class="set-num">${s+1}</span>
-          <input class="set-input ${setData.done?'done':''}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${esc(num(placeholder))}" value="${esc(setData.weight)}" oninput="markDirty()" onchange="autoSave()">
-          <div class="quick-btns">
-            <button onclick="adjustWeight(${ei},${s},${step})">+</button>
-            <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
-          </div>
-          <input class="set-input ${setData.done?'done':''}" id="r-${ei}-${s}" type="number" min="0" placeholder="${esc(repsPlaceholder)}" value="${esc(setData.reps)}" oninput="markDirty()" onchange="autoSave()">
+      const doneCls = setData.done ? 'done' : '';
+      // Einseitig: zwei Wiederholungsfelder L / R statt Feld + Plus/Minus
+      const repsCells = uni ? `
+          <input class="set-input ${doneCls}" id="rl-${ei}-${s}" type="number" min="0" placeholder="${esc(repsPlaceholder)}" value="${esc(setData.repsL ?? '')}" oninput="markDirty()" onchange="autoSave()" aria-label="Wiederholungen links">
+          <input class="set-input ${doneCls}" id="rr-${ei}-${s}" type="number" min="0" placeholder="${esc(repsPlaceholder)}" value="${esc(setData.repsR ?? '')}" oninput="markDirty()" onchange="autoSave()" aria-label="Wiederholungen rechts">` : `
+          <input class="set-input ${doneCls}" id="r-${ei}-${s}" type="number" min="0" placeholder="${esc(repsPlaceholder)}" value="${esc(setData.reps)}" oninput="markDirty()" onchange="autoSave()">
           <div class="quick-btns">
             <button onclick="adjustReps(${ei},${s},1)">+</button>
             <button onclick="adjustReps(${ei},${s},-1)">−</button>
-          </div>
+          </div>`;
+      html += `
+        <div class="set-row${uni ? ' uni' : ''}" id="set-row-${ei}-${s}">
+          <span class="set-num">${s+1}</span>
+          <input class="set-input ${doneCls}" id="w-${ei}-${s}" type="number" step="${step}" min="0" placeholder="${esc(num(placeholder))}" value="${esc(setData.weight)}" oninput="markDirty()" onchange="autoSave()">
+          <div class="quick-btns">
+            <button onclick="adjustWeight(${ei},${s},${step})">+</button>
+            <button onclick="adjustWeight(${ei},${s},-${step})">−</button>
+          </div>${repsCells}
           <button class="check-btn ${setData.done?'checked':''}" id="chk-${ei}-${s}" onclick="toggleDone(${ei},${s})">✓</button>
         </div>
       `;
@@ -3290,9 +3340,7 @@ function renderDayInner() {
               if (!s.weight && !s.reps) return '';
               const { high } = parseRepRange(ex.reps);
               const exceeded = s.reps && parseInt(s.reps) > high;
-              const value = s.weight
-                ? `${esc(num(s.weight))} kg × ${esc(s.reps || '—')} Wdh.`
-                : `${esc(s.reps)} Wdh.`;
+              const value = esc(formatSet(s, { long: true }));
               return `<div class="history-entry">
                 <span class="history-date">Satz ${i+1}</span>
                 <span class="history-sets ${exceeded ? 'history-exceeded' : ''}">${value}${exceeded ? ' ↑' : ''}</span>
@@ -3408,6 +3456,44 @@ function toggleWarmup(ei, k) {
   });
   unlockAudio();
   autoSave();
+}
+
+// ── EINSEITIGE ÜBUNGEN (LINKS / RECHTS) ───────────────────────
+// Gleiches Gewicht für beide Seiten, Wiederholungen getrennt (repsL/repsR).
+// Für alles Weitere (Vorschlag, Rekord, 1RM, Stagnation) zählt in "reps" die
+// SCHWÄCHERE Seite – gesteigert wird erst, wenn auch sie die Obergrenze
+// schafft. Erkennung: "einarmig" im Namen; im Plan pro Übung umschaltbar
+// (ex.unilateral). Bei einer nur heute getauschten Übung zählt ihr Name.
+const UNILATERAL_RE = /einarmig/i;
+
+function isUnilateralSlot(day, ei) {
+  const ex = day.exercises[ei];
+  if (swappedExercises[ei]) return UNILATERAL_RE.test(swappedExercises[ei]);
+  if (typeof ex.unilateral === 'boolean') return ex.unilateral;
+  return UNILATERAL_RE.test(ex.name);
+}
+
+// Wertung eines einseitigen Satzes: die schwächere Seite
+function sideReps(l, r) {
+  const a = parseInt(l, 10), b = parseInt(r, 10);
+  if (!isNaN(a) && !isNaN(b)) return String(Math.min(a, b));
+  if (!isNaN(a)) return String(a);
+  if (!isNaN(b)) return String(b);
+  return '';
+}
+
+// Hängt eine Seite dauerhaft hinterher? Letzte 6 Einheiten, mindestens 4
+// Sätze mit beiden Seiten, im Schnitt mindestens 1 Wdh. Unterschied.
+function sideImbalance(exerciseId, exerciseName) {
+  const diffs = [];
+  getLastEntriesById(exerciseId, exerciseName, 6).forEach(sets => sets.forEach(s => {
+    const l = parseInt(s?.repsL, 10), r = parseInt(s?.repsR, 10);
+    if (!isNaN(l) && !isNaN(r)) diffs.push(l - r);
+  }));
+  if (diffs.length < 4) return null;
+  const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  if (Math.abs(avg) < 1) return null;
+  return { weaker: avg < 0 ? 'links' : 'rechts', diff: Math.round(Math.abs(avg) * 10) / 10 };
 }
 
 // ── SUPERSÄTZE ────────────────────────────────────────────────
@@ -3850,14 +3936,22 @@ function closeTimer() {
       while (sessionData[nextEi].sets.length <= nextS) {
         sessionData[nextEi].sets.push({ weight: '', reps: '', done: false });
       }
-      if (weightEl.value) sessionData[nextEi].sets[nextS].weight = weightEl.value;
-      if (repsEl.value) sessionData[nextEi].sets[nextS].reps = repsEl.value;
-      autoSave();
-      // Update visible inputs if exercise is open
+      const next = sessionData[nextEi].sets[nextS];
+      if (weightEl.value) next.weight = weightEl.value;
+      if (repsEl.value) next.reps = repsEl.value;
+      // Sichtbare Felder ZUERST setzen – autoSave liest sie wieder ein
       const wEl = document.getElementById(`w-${nextEi}-${nextS}`);
       const rEl = document.getElementById(`r-${nextEi}-${nextS}`);
       if (wEl && weightEl.value) wEl.value = weightEl.value;
       if (rEl && repsEl.value) rEl.value = repsEl.value;
+      // Einseitig: die Vorbelegung gilt für beide Seiten (nur leere Felder)
+      const lEl = document.getElementById(`rl-${nextEi}-${nextS}`);
+      const rrEl = document.getElementById(`rr-${nextEi}-${nextS}`);
+      if (lEl && rrEl && repsEl.value) {
+        if (!lEl.value) lEl.value = repsEl.value;
+        if (!rrEl.value) rrEl.value = repsEl.value;
+      }
+      autoSave();
     }
   }
 
@@ -4029,8 +4123,14 @@ function toggleDone(ei, s) {
   if (!sessionData[ei]) sessionData[ei] = { sets: [] };
   if (!sessionData[ei].sets[s]) sessionData[ei].sets[s] = { weight: '', reps: '', done: false };
   if (!sessionData[ei].sets[s].done) {
-    fillFromPlaceholder(`w-${ei}-${s}`, sessionData[ei].sets[s], 'weight');
-    fillFromPlaceholder(`r-${ei}-${s}`, sessionData[ei].sets[s], 'reps');
+    const set = sessionData[ei].sets[s];
+    fillFromPlaceholder(`w-${ei}-${s}`, set, 'weight');
+    fillFromPlaceholder(`r-${ei}-${s}`, set, 'reps');
+    if (document.getElementById(`rl-${ei}-${s}`)) {
+      fillFromPlaceholder(`rl-${ei}-${s}`, set, 'repsL');
+      fillFromPlaceholder(`rr-${ei}-${s}`, set, 'repsR');
+      set.reps = sideReps(set.repsL, set.repsR);
+    }
   }
   sessionData[ei].sets[s].done = !sessionData[ei].sets[s].done;
   const btn = document.getElementById(`chk-${ei}-${s}`);
@@ -4511,6 +4611,7 @@ function showExerciseDetail(exerciseId, exerciseName) {
   const bestE1 = getBestE1rmById(exerciseId, exerciseName);
   const lastE1 = bestE1rm(lastSets);
   const stagnation = getStagnation(exerciseId, exerciseName);
+  const imbalance = sideImbalance(exerciseId, exerciseName);
   // Gelerntes Steigerungsprofil – braucht den Zielbereich aus dem Plan
   const planEx = Object.values(PLAN_DEFS).flatMap(p => p.days).flatMap(d => d.exercises).find(e => e.id === exerciseId);
   const profile = planEx ? learnProgression(exerciseId, exerciseName, planEx.reps) : null;
@@ -4553,6 +4654,10 @@ function showExerciseDetail(exerciseId, exerciseName) {
           <div style="font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent)">${num(bestE1)} kg</div>
           ${lastE1 > 0 ? `<div style="font-size:12px;color:var(--muted)">zuletzt ${num(lastE1)} kg</div>` : ''}
         </div>
+      </div>` : ''}
+      ${imbalance ? `
+      <div style="grid-column:1/-1;background:color-mix(in srgb, var(--pull) 12%, transparent);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
+        <b>↔ ${imbalance.weaker === 'links' ? 'Links' : 'Rechts'} schaffst du im Schnitt ${num(imbalance.diff)} Wdh. weniger.</b> Beginne mit der ${imbalance.weaker === 'links' ? 'linken' : 'rechten'} Seite und mach mit der anderen nicht mehr Wiederholungen – so gleicht sich der Unterschied mit der Zeit aus.
       </div>` : ''}
       ${profileText ? `
       <div style="grid-column:1/-1;background:var(--bg3);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
