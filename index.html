@@ -800,6 +800,19 @@ let activeDate = null; // null = heute
 let dirty = false;
 
 function getKey(dayId, date) { return `gymbook:${dayId}:${date}`; }
+
+// ── ÜBUNGEN NUR FÜR HEUTE ─────────────────────────────────────
+// Spontan zusätzliche Übungen für die aktuelle Einheit – der Plan bleibt
+// unverändert. Sie hängen hinter den Plan-Übungen (Index ab Planlänge) und
+// werden mit der Einheit gespeichert (Feld "extras").
+// curDay() = Plan-Tag + diese Übungen. Der Trainingsablauf nutzt curDay(),
+// der Plan-Editor bewusst DAYS[currentDay].
+let sessionExtras = [];
+function curDay() {
+  const day = DAYS[currentDay];
+  if (!sessionExtras.length) return day;
+  return { ...day, exercises: day.exercises.concat(sessionExtras) };
+}
 // Datum als JJJJ-MM-TT in ÖRTLICHER Zeit. toISOString() rechnet in UTC –
 // damit galt in Deutschland bis 1 Uhr (Winter) bzw. 2 Uhr (Sommer) noch der
 // Vortag, und ein Training kurz nach Mitternacht landete am falschen Datum.
@@ -1530,23 +1543,25 @@ function setStatus(msg, ok) {
 // ─────────────────────────────────────────────────────────────
 
 function loadSessionData() {
-  const day = DAYS[currentDay];
   const date = activeDateStr();
-  const existing = storageGet(getKey(day.id, date));
+  const existing = storageGet(getKey(DAYS[currentDay].id, date));
   sessionData = {};
   swappedExercises = {};
   swappedExerciseIds = {};
   sessionSupersets = null;
+  sessionExtras = [];
   if (existing) {
     if (existing.sets) {
       sessionData = existing.sets;
       swappedExercises = existing.swapped || {};
       swappedExerciseIds = existing.swappedIds || {};
       sessionSupersets = Array.isArray(existing.supersets) ? existing.supersets : null;
+      sessionExtras = Array.isArray(existing.extras) ? existing.extras : [];
     } else {
       sessionData = existing;
     }
   }
+  const day = curDay();   // erst jetzt – inkl. der "nur heute"-Übungen dieser Einheit
   // Jede Übung des Tages muss einen Eintrag mit Satz-Feldern haben. Beim
   // Hochladen werden unberührte Übungen weggelassen (spart Platz) – beim
   // Laden werden sie hier wieder ergänzt. Ohne das würden zahlreiche Stellen,
@@ -1562,7 +1577,7 @@ function loadSessionData() {
 }
 
 function saveSession() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
   collectInputValues();
 
@@ -1595,6 +1610,7 @@ function saveSession() {
     sets: sessionData, swapped: swappedExercises, swappedIds: swappedExerciseIds,
     meta: slotMeta, startedAt,
     ...(Array.isArray(sessionSupersets) ? { supersets: sessionSupersets } : {}),
+    ...(sessionExtras.length ? { extras: sessionExtras } : {}),
     ...(prev.completed ? { completed: true } : {}),
     ...(prev.durationMin ? { durationMin: prev.durationMin, setsDone: prev.setsDone } : {})
   });
@@ -1607,7 +1623,7 @@ function saveSession() {
 }
 
 function collectInputValues() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   day.exercises.forEach((ex, ei) => {
     const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
       ? sessionData[ei].activeSets : ex.sets;
@@ -1836,7 +1852,7 @@ let skipTargetEi = null;
 
 function openSkipModal(ei) {
   skipTargetEi = ei;
-  const ex = DAYS[currentDay].exercises[ei];
+  const ex = curDay().exercises[ei];
   const displayName = swappedExercises[ei] || ex.name;
   const html = `
     <button class="modal-close" onclick="closeSkipModal()">×</button>
@@ -1915,7 +1931,7 @@ function adjustWeight(ei, s, delta) {
 
 function adjustSets(ei, delta) {
   collectInputValues();   // gerade getippte Werte berücksichtigen
-  const ex = DAYS[currentDay].exercises[ei];
+  const ex = curDay().exercises[ei];
   if (!sessionData[ei]) sessionData[ei] = { sets: [], activeSets: ex.sets };
   const current = sessionData[ei].activeSets != null ? sessionData[ei].activeSets : ex.sets;
   let next;
@@ -2087,7 +2103,7 @@ function openCatalog(ei) {
   catalogTargetEi = ei;
   catalogTargetDi = currentDay;
   catalogEditMode = false;
-  const swappedName = swappedExercises[ei] || DAYS[currentDay].exercises[ei].name;
+  const swappedName = swappedExercises[ei] || curDay().exercises[ei].name;
   catalogActiveMuscle = getMuscleCategoryForExercise(swappedName);
   renderCatalog();
   document.getElementById('catalog-modal').style.display = 'flex';
@@ -2096,6 +2112,67 @@ function openCatalog(ei) {
 function closeCatalog() {
   document.getElementById('catalog-modal').style.display = 'none';
   catalogAppendMode = false;
+  catalogSessionAppend = false;
+}
+
+// Katalog im Modus "nur für heute": hängt eine Übung an die aktuelle
+// Einheit an, ohne den Plan anzufassen
+let catalogSessionAppend = false;
+function openSessionAddCatalog() {
+  catalogSessionAppend = true;
+  openAddFromCatalog(currentDay);
+}
+
+function addSessionExtra(name, id) {
+  // Steht die Übung in irgendeinem Plan, deren Sätze/Wdh./Pause übernehmen
+  const tmpl = Object.values(PLAN_DEFS).flatMap(p => p.days).flatMap(d => d.exercises).find(e => e.id === id);
+  const ex = tmpl
+    ? { id, name, muscle: tmpl.muscle, sets: tmpl.sets, reps: tmpl.reps, pause: tmpl.pause, ...(tmpl.step ? { step: tmpl.step } : {}) }
+    : { id, name, muscle: CATALOG[catalogActiveMuscle].label, sets: 3, reps: '8–12', pause: '90 Sek' };
+  ex.extra = true;
+  collectInputValues();
+  sessionExtras.push(ex);
+  const ei = DAYS[currentDay].exercises.length + sessionExtras.length - 1;
+  sessionData[ei] = { sets: Array.from({ length: ex.sets }, () => ({ weight: '', reps: '', done: false })) };
+  closeCatalog();
+  autoSave();
+  renderDay();
+  reopenCard(ei);
+  setTimeout(() => document.getElementById(`exbody-${ei}`)?.closest('.exercise-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+}
+
+function removeSessionExtra(ei) {
+  const planLen = DAYS[currentDay].exercises.length;
+  const k = ei - planLen;
+  if (k < 0 || k >= sessionExtras.length) return;
+  collectInputValues();
+  const hasData = (sessionData[ei]?.sets || []).some(s => s && (s.weight || s.reps || s.done));
+  if (hasData && !confirm('Diese Übung hat schon Einträge. Trotzdem aus dem heutigen Training entfernen?')) return;
+  sessionExtras.splice(k, 1);
+  // Alles hinter der entfernten Übung rückt um eine Position nach vorn
+  const shift = obj => {
+    const out = {};
+    Object.keys(obj || {}).forEach(key => {
+      const i = Number(key);
+      if (i < ei) out[i] = obj[key];
+      else if (i > ei) out[i - 1] = obj[key];
+    });
+    return out;
+  };
+  sessionData = shift(sessionData);
+  swappedExercises = shift(swappedExercises);
+  swappedExerciseIds = shift(swappedExerciseIds);
+  if (Array.isArray(sessionSupersets)) {
+    sessionSupersets = sessionSupersets
+      .filter(([a, b]) => a !== ei && b !== ei)
+      .map(([a, b]) => [a > ei ? a - 1 : a, b > ei ? b - 1 : b]);
+  }
+  // Die angezeigten Eingabefelder tragen noch die ALTEN Positionen – vor dem
+  // Speichern entfernen, sonst liest saveSession sie ein und schreibt die
+  // Werte der entfernten Übung in die nachgerückte.
+  document.getElementById('main-content').innerHTML = '';
+  saveSession();
+  renderDay();
 }
 
 function openAddFromCatalog(di) {
@@ -2107,6 +2184,7 @@ function openAddFromCatalog(di) {
 }
 
 function appendCatalogExercise(name, id) {
+  if (catalogSessionAppend) { addSessionExtra(name, id); return; }
   const di = catalogAppendDi;
   const muscleLabel = CATALOG[catalogActiveMuscle].label;
   const newEx = { id, name, muscle: muscleLabel, sets: 2, reps: '8–10', pause: '90 Sek', alternatives: [] };
@@ -2126,13 +2204,15 @@ function renderCatalog() {
       </button>
     `).join('');
 
-    const alreadyInDay = new Set(DAYS[di].exercises.map(e => e.id));
+    // "Nur heute": auch bereits hinzugefügte Extras und heutige Tausche zählen
+    const dayExercises = catalogSessionAppend ? curDay().exercises : DAYS[di].exercises;
+    const alreadyInDay = new Set(dayExercises.map((e, i) => (catalogSessionAppend && swappedExerciseIds[i]) || e.id));
     const exercises = CATALOG[catalogActiveMuscle].exercises.map(exObj => {
       const name = exObj.name;
       const already = alreadyInDay.has(exObj.id);
       return `
         <div class="cat-ex-row ${already ? 'cat-ex-active' : ''}" onclick="${already ? '' : `appendCatalogExercise(${jsArg(name)}, ${jsArg(exObj.id)})`}" style="${already ? 'opacity:0.4;cursor:default' : ''}">
-          <span class="cat-ex-name">${esc(name)}${already ? ' <span class="cat-active-badge">Bereits im Plan</span>' : ''}</span>
+          <span class="cat-ex-name">${esc(name)}${already ? ` <span class="cat-active-badge">${catalogSessionAppend ? 'Schon im Training' : 'Bereits im Plan'}</span>` : ''}</span>
           <span class="cat-ex-arrow">${already ? '✓' : '+'}</span>
         </div>
       `;
@@ -2141,8 +2221,8 @@ function renderCatalog() {
     document.getElementById('catalog-inner').innerHTML = `
       <div class="cat-header">
         <div>
-          <div class="cat-title">+ Übung hinzufügen</div>
-          <div class="cat-subtitle">Wird als neue Zeile ergänzt</div>
+          <div class="cat-title">${catalogSessionAppend ? '+ Übung nur für heute' : '+ Übung hinzufügen'}</div>
+          <div class="cat-subtitle">${catalogSessionAppend ? 'Kommt ans Ende des Trainings – der Plan bleibt unverändert' : 'Wird als neue Zeile ergänzt'}</div>
         </div>
         <button class="modal-close" onclick="closeCatalog()">×</button>
       </div>
@@ -2154,7 +2234,8 @@ function renderCatalog() {
 
   const ei = catalogTargetEi;
   const di = catalogEditMode ? catalogTargetDi : currentDay;
-  const ex = DAYS[di].exercises[ei];
+  // Tauschen im Training: auch "nur heute"-Übungen (curDay); im Editor der Plan
+  const ex = catalogEditMode ? DAYS[di].exercises[ei] : curDay().exercises[ei];
   const swappedName = catalogEditMode ? null : (swappedExercises[ei] || null);
 
   const tabs = Object.entries(CATALOG).map(([key, cat]) => `
@@ -2298,6 +2379,9 @@ function getPlanEditRemaps() {
     // Übungen, die gelöscht wurden, aber heute schon Einträge hatten
     const lost = orig.map((ex, oi) => oi).filter(oi => !newToOld.includes(oi) && raw.sets[oi]
       && (raw.sets[oi].skipped || loggedSets(raw.sets[oi].sets).length));
+    // "Nur heute"-Übungen hängen hinter dem Plan – sie rücken mit der neuen
+    // Planlänge mit (alte Position: alte Planlänge + k)
+    (raw.extras || []).forEach((_, k) => newToOld.push(orig.length + k));
     remaps.push({ key, raw, newToOld, lost: lost.length });
   });
   return remaps;
@@ -2960,7 +3044,7 @@ function deleteEditExercise(di, ei) {
 }
 
 function renderEditDay() {
-  const day = DAYS[currentDay];
+  const day = DAYS[currentDay];   // bewusst der reine Plan – ohne "nur heute"-Übungen
   const di = currentDay;
   let html = `
     <div class="edit-mode-bar">
@@ -3108,7 +3192,7 @@ function renderSafely(name, fn, containerId, withHint) {
 }
 
 function renderDayInner() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   loadSessionData();
   const date = activeDateStr();
   const isBackEntry = date !== todayStr();
@@ -3160,7 +3244,7 @@ function renderDayInner() {
       html += `<div class="superset-group">
         <div class="superset-head">
           <span>⛓ Supersatz · Pause nach beiden</span>
-          <button onclick="setSessionSupersets(supersetPairs(DAYS[currentDay]).filter(([a]) => a !== ${ei}))">Auflösen</button>
+          <button onclick="setSessionSupersets(supersetPairs(curDay()).filter(([a]) => a !== ${ei}))">Auflösen</button>
         </div>`;
     }
     const sd = sessionData[ei] || { sets: [] };
@@ -3213,7 +3297,7 @@ function renderDayInner() {
         <div class="exercise-header" onclick="toggleEx(${ei}, this)">
           <div style="flex:1;min-width:0">
             <div class="ex-title-row">
-              <span class="ex-name">${esc(displayName)}${swappedName ? ' <span style="font-size:12px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}</span>
+              <span class="ex-name">${esc(displayName)}${swappedName ? ' <span style="font-size:12px;color:var(--legs);font-family:var(--mono);font-weight:400">(ersetzt)</span>' : ''}${ex.extra ? ' <span style="font-size:12px;color:var(--accent);font-family:var(--mono);font-weight:400">(nur heute)</span>' : ''}</span>
               <span class="ex-target">${esc(ex.reps)}</span>
             </div>
             <div class="progress-dots">${progressDots}</div>
@@ -3230,7 +3314,9 @@ function renderDayInner() {
             <button class="swap-btn ${ss ? 'active' : ''}" onclick="event.stopPropagation();openSupersetPicker(${ei})">${ss ? '⛓ Supersatz lösen' : '⛓ Supersatz'}</button>
             <button class="swap-btn ${swappedName ? 'active' : ''}" onclick="event.stopPropagation();openCatalog(${ei})">⇄ Übung tauschen</button>
             ${swappedName ? `<button class="swap-btn" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();resetSwap(${ei})">↺ Zurücksetzen</button>` : ''}
-            ${skipData
+            ${ex.extra
+              ? `<button class="swap-btn" style="color:var(--red)" onclick="event.stopPropagation();removeSessionExtra(${ei})">✕ Entfernen</button>`
+              : skipData
               ? `<button class="swap-btn" style="color:var(--accent);border-color:var(--accent)" onclick="event.stopPropagation();unskipExercise(${ei})">↩ Wiederholen</button>`
               : `<button class="swap-btn" style="color:var(--red);border-color:color-mix(in srgb, var(--red) 30%, transparent)" onclick="event.stopPropagation();openSkipModal(${ei})">✕ Überspringen</button>`
             }
@@ -3368,6 +3454,9 @@ function renderDayInner() {
     html += `</div></div>`;
     if (ss && !ss.first) html += `</div>`;   // Supersatz-Rahmen schließen
   });
+
+  // Spontan eine Übung dazunehmen – nur für diese Einheit
+  html += `<button class="plan-add-btn" onclick="openSessionAddCatalog()">+ Übung nur für heute hinzufügen</button>`;
 
   document.getElementById('main-content').innerHTML = html;
   document.getElementById('main-content').style.paddingBottom = '120px';
@@ -3548,7 +3637,7 @@ function displayOrder(day) {
 //   superset 'switch': von A zu B (nur kurzer Wechsel)
 //   superset 'round' : von B zurück zu A (volle Pause)
 function nextSetAfter(ei, s) {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const setsOf = i => sessionData[i]?.activeSets ?? day.exercises[i].sets;
   const open = (i, k) => k < setsOf(i) && !sessionData[i]?.skipped && !sessionData[i]?.sets?.[k]?.done;
   const ss = supersetInfo(day, ei);
@@ -3576,7 +3665,7 @@ function setSessionSupersets(pairs, reopen) {
 
 // Knopf "⛓ Supersatz" in der Übungskarte: Partner wählen bzw. auflösen
 function openSupersetPicker(ei) {
-  const day = DAYS[currentDay];
+  const day = curDay();
   if (supersetInfo(day, ei)) {
     setSessionSupersets(supersetPairs(day).filter(([a, b]) => a !== ei && b !== ei), ei);
     return;
@@ -3601,7 +3690,7 @@ function openSupersetPicker(ei) {
 
 function pairSuperset(a, b) {
   closeModal();
-  const pairs = supersetPairs(DAYS[currentDay]).slice();
+  const pairs = supersetPairs(curDay()).slice();
   pairs.push([Math.min(a, b), Math.max(a, b)]);
   setSessionSupersets(pairs, Math.min(a, b));
 }
@@ -3819,7 +3908,7 @@ function setRir(ei, s, v) {
 }
 
 function showTimerNextInfo(ei, s) {
-  const day = DAYS[currentDay];
+  const day = curDay();
   if (!day.exercises[ei]) return;
 
   // Nächster Satz – bei Supersätzen abwechselnd zwischen beiden Übungen
@@ -3999,7 +4088,7 @@ function getAvgSecondsPerSet(dayId) {
 }
 
 function calcTrainingEnd() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const learned = getAvgSecondsPerSet(day.id);
 
   let remainingSets = 0;
@@ -4051,7 +4140,7 @@ function updateTrainingEnd() {
 }
 
 function deleteSession() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
   if (!confirm(`Einheit vom ${formatDate(date)} wirklich löschen?`)) return;
   // Einheit UND zugehörige Notiz löschen (die Notiz blieb vorher verwaist
@@ -4080,7 +4169,7 @@ function showPRCelebration(text) {
 }
 
 function toggleAllExercises(open) {
-  const day = DAYS[currentDay];
+  const day = curDay();
   day.exercises.forEach((_, ei) => {
     const body = document.getElementById(`exbody-${ei}`);
     const chev = document.getElementById(`chev-${ei}`);
@@ -4090,7 +4179,7 @@ function toggleAllExercises(open) {
 }
 
 function saveNote() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
   const noteKey = `gymbook:note:${day.id}:${date}`;
   const val = document.getElementById('session-note')?.value || '';
@@ -4155,7 +4244,7 @@ function toggleDone(ei, s) {
     // Wiederholungen bewusst NICHT – dort steht das eigene Satzziel als
     // Vorschlag (setTargets), das sonst überschrieben würde.
     const nextS = s + 1;
-    const activeSets = sessionData[ei]?.activeSets ?? DAYS[currentDay].exercises[ei].sets;
+    const activeSets = sessionData[ei]?.activeSets ?? curDay().exercises[ei].sets;
     if (nextS < activeSets) {
       if (!sessionData[ei].sets[nextS]) sessionData[ei].sets[nextS] = { weight: '', reps: '', done: false };
       if (!sessionData[ei].sets[nextS].weight && sessionData[ei].sets[s].weight) {
@@ -4168,11 +4257,11 @@ function toggleDone(ei, s) {
     // PR check
     const weight = parseFloat(sessionData[ei].sets[s].weight);
     if (!isNaN(weight) && weight > 0) {
-      const ex = DAYS[currentDay].exercises[ei];
+      const ex = curDay().exercises[ei];
       const displayName = swappedExercises[ei] || ex.name;
       const displayId = swappedExerciseIds[ei] || ex.id || slugify(ex.name);
       // Bisheriger Rekord OHNE die laufende Einheit …
-      const pr = getPersonalRecordById(displayId, displayName, getKey(DAYS[currentDay].id, activeDateStr()));
+      const pr = getPersonalRecordById(displayId, displayName, getKey(curDay().id, activeDateStr()));
       // … plus die schon abgehakten anderen Sätze dieser Übung heute, damit
       // die Meldung nicht bei jedem weiteren Satz mit gleichem Gewicht kommt.
       const todayBest = Math.max(0, ...sessionData[ei].sets
@@ -4187,14 +4276,14 @@ function toggleDone(ei, s) {
         const cur = sessionData[ei].sets[s];
         const est = e1rm(cur.weight, cur.reps);
         const prevBest = Math.max(
-          getBestE1rmById(displayId, displayName, getKey(DAYS[currentDay].id, activeDateStr())),
+          getBestE1rmById(displayId, displayName, getKey(curDay().id, activeDateStr())),
           bestE1rm(sessionData[ei].sets.filter((st, i) => i !== s && st.done)));
         if (prevBest > 0 && est > prevBest) showPRCelebration(`🏆 Bestleistung! ${num(cur.weight)} kg × ${cur.reps} (≈ ${num(est)} kg 1RM)`);
       }
     }
 
     // Check if all sets done → auto-collapse
-    const ex = DAYS[currentDay].exercises[ei];
+    const ex = curDay().exercises[ei];
     const activeSetsCount = sessionData[ei]?.activeSets ?? ex.sets;
     const allDone = sessionData[ei].sets.slice(0, activeSetsCount).every(st => st.done);
     if (allDone) {
@@ -4212,7 +4301,7 @@ function toggleDone(ei, s) {
   updateTrainingEnd();
 
   if (done && timerEnabled) {
-    const day = DAYS[currentDay];
+    const day = curDay();
     const ex = day.exercises[ei];
     const displayName = swappedExercises[ei] || ex.name;
     const pauseOf = i => defaultPauseOverrides[swappedExercises[i] || day.exercises[i].name] || parsePause(day.exercises[i].pause);
@@ -4266,7 +4355,7 @@ function switchDay(i) {
 }
 
 function exportSummary() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
   const noteKey = `gymbook:note:${day.id}:${date}`;
   const note = storageGet(noteKey) || '';
@@ -5415,7 +5504,7 @@ function renderHomeInner() {
 let sessionStartTime = null;
 
 function showFinishModal() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
 
   // Calculate stats
@@ -5469,7 +5558,7 @@ function closeFinishModal() {
 }
 
 function completeSession() {
-  const day = DAYS[currentDay];
+  const day = curDay();
   const date = activeDateStr();
 
   // Save note from modal if filled in
@@ -5681,7 +5770,7 @@ function updateMenuDeleteEntry() {
   entry.style.display = hasData ? 'flex' : 'none';
   if (divider) divider.style.display = hasData ? 'block' : 'none';
   if (hasData && label) {
-    const day = DAYS[currentDay];
+    const day = curDay();
     label.textContent = `Einheit löschen (${day.type}, ${formatDate(activeDateStr())})`;
   }
 }
