@@ -237,6 +237,8 @@
 
   /* Muskelgruppe/Pause: aus dem Kopf in die aufgeklappte Ansicht verschoben */
   .ex-detail-meta { font-family: var(--mono); font-size: 12px; color: var(--muted2); padding: 2px 0 6px; }
+  .pause-tip { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); background: var(--bg3); border-radius: 8px; padding: 8px 10px; margin: 2px 0 8px; line-height: 1.4; }
+  .pause-tip b { color: var(--text); }
   .quick-btns { display: flex; flex-direction: column; gap: 3px; }
   .quick-btns button { background: var(--bg3); border: none; color: var(--accent); font-family: var(--mono); font-size: 17px; font-weight: 600; width: 42px; height: 38px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.1s; line-height: 1; padding: 0; }
   .quick-btns button:active { transform: scale(0.92); background: var(--accent-dim2); }
@@ -921,6 +923,7 @@ const FIXED_BIN_ID = '6a1d9bd121f9ee59d2a5bc77';
 let binId = FIXED_BIN_ID;
 let cloudData = {};
 let cloudLoaded = false;
+let cloudStale = false;   // Arbeitsstand ist ein alter Notfall-Stand (Cloud war nicht erreichbar)
 
 async function cloudInit() {
   // Frische lokale Kopie vorhanden (App wurde gerade erst neu gestartet)?
@@ -974,7 +977,11 @@ async function cloudPull() {
   if (!getJsonbinKey()) { setStatus('Cloud nicht eingerichtet – nur lokal', false); return; }
   try {
     const remote = await fetchRemote();
-    if (remote.error) { setStatus(`⚠ Cloud-Fehler (${remote.error})`, false); return; }
+    if (remote.error) {
+      setStatus(`⚠ Cloud-Fehler (${remote.error})`, false);
+      adoptStaleCache(`⚠ Cloud-Fehler (${remote.error})`);
+      return;
+    }
     adoptCloudState(remote.data, Date.now());
 
     // Liegt in der Cloud noch die lange Schreibweise, einmalig kompakt
@@ -989,13 +996,33 @@ async function cloudPull() {
   } catch(e) {
     cloudLoaded = false;
     setStatus(`⚠ Offline (${e.message})`, false);
+    adoptStaleCache('⚠ Offline');
   }
+}
+
+// Cloud nicht erreichbar: mit dem zuletzt geladenen Stand weiterarbeiten
+// (auch wenn er älter ist), statt nur mit dem lokalen Speicher – darin
+// fehlen z. B. Planänderungen vom anderen Gerät. Hochladen bleibt sicher:
+// cloudPush holt vorher immer den aktuellen Stand und legt nur die eigenen
+// Änderungen darauf; beim Schließen wird mit altem Stand nicht gesendet.
+function adoptStaleCache(prefix) {
+  if (cloudLoaded) return;   // z. B. Vordergrund-Abruf: aktueller Stand ist schon da
+  const cache = readCloudCache();
+  if (!cache) return;
+  try {
+    adoptCloudState(decodeCloudData(cache.data), cache.at);
+    cloudStale = true;   // cloudPush lädt vor dem Hochladen zwingend neu
+  } catch(e) { cloudLoaded = false; return; }
+  const d = new Date(cache.at);
+  setStatus(`${prefix} – Stand vom ${formatDate(localDateStr(d))}, ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`, false);
+  renderAfterSync();
 }
 
 // Einen Cloud-Stand (frisch geladen oder aus der lokalen Kopie) übernehmen
 function adoptCloudState(data, at) {
   cloudData = data;
   cloudLoaded = true;
+  cloudStale = false;
   lastPullAt = at;
   invalidateExerciseIndex();           // komplett neuer Datenstand
 
@@ -1108,13 +1135,14 @@ async function cloudPush(opts = {}) {
   // in der Sicherheitsliste (gymbook:pending) und werden beim nächsten
   // erfolgreichen Laden automatisch übernommen.
   let freshlyPulled = false;   // in DIESEM Aufruf gerade frisch geladen
-  if (!cloudLoaded) {
+  // Ein alter Notfall-Stand (cloudStale) zählt nicht als geladen
+  if (!cloudLoaded || cloudStale) {
     // Beim Schließen bleibt keine Zeit, erst zu laden – dann lieber nichts
     // senden. Die Änderungen liegen sicher in der Sicherheitsliste.
     if (opts.closing) return false;
     await cloudPullOnce();
     freshlyPulled = true;
-    if (!cloudLoaded) {
+    if (!cloudLoaded || cloudStale) {
       setStatus('⚠ Cloud nicht erreichbar – nur lokal gesichert', false);
       return false;
     }
@@ -1136,6 +1164,7 @@ async function cloudPush(opts = {}) {
     if (remote.error) { setStatus(`⚠ Cloud-Fehler (${remote.error}) – nur lokal gesichert`, false); return false; }
     applyLocalChanges(remote.data, cloudData);
     cloudData = remote.data;
+    cloudStale = false;
     lastPullAt = Date.now();
     invalidateExerciseIndex();
   }
@@ -1357,7 +1386,8 @@ function encodeSession(v, dict) {
     const s = {};
     for (const [ei, slot] of Object.entries(v.sets)) {
       if (!slot || typeof slot !== 'object' || !Array.isArray(slot.sets)) return fail();
-      if (Object.keys(slot).some(k => k !== 'sets' && k !== 'activeSets' && k !== 'skipped' && k !== 'warmup')) return fail();
+      if (Object.keys(slot).some(k => !['sets', 'activeSets', 'skipped', 'warmup', 'rest'].includes(k))) return fail();
+      if (slot.rest !== undefined && !Number.isInteger(slot.rest)) return fail();
       const str = encList(slot.sets);
       if (str === null) return fail();
       const extras = {};
@@ -1368,6 +1398,7 @@ function encodeSession(v, dict) {
         if (w === null) return fail();
         extras.w = w;
       }
+      if (slot.rest !== undefined) extras.r = slot.rest;
       s[ei] = Object.keys(extras).length ? { s: str, ...extras } : str;
     }
     const enc = { _f: 2, s };
@@ -1414,6 +1445,7 @@ function decodeSession(enc, list) {
       if (e.a !== undefined) slot.activeSets = e.a;
       if (e.k !== undefined) slot.skipped = e.k;
       if (e.w !== undefined) slot.warmup = decList(e.w);
+      if (e.r !== undefined) slot.rest = e.r;
     }
     sets[ei] = slot;
   });
@@ -1761,7 +1793,7 @@ function getExerciseIndex() {
     const date = key.split(':')[2];
     if (raw.meta) {
       for (const ei in raw.meta) {
-        if (Array.isArray(sets[ei]?.sets)) add(byId, raw.meta[ei].id, { key, date, sets: sets[ei].sets });
+        if (Array.isArray(sets[ei]?.sets)) add(byId, raw.meta[ei].id, { key, date, sets: sets[ei].sets, rest: sets[ei].rest });
       }
     } else {
       const day = DAYS.find(d => d.id === key.split(':')[1]);
@@ -2128,7 +2160,8 @@ function addSessionExtra(name, id) {
   const tmpl = Object.values(PLAN_DEFS).flatMap(p => p.days).flatMap(d => d.exercises).find(e => e.id === id);
   const ex = tmpl
     ? { id, name, muscle: tmpl.muscle, sets: tmpl.sets, reps: tmpl.reps, pause: tmpl.pause, ...(tmpl.step ? { step: tmpl.step } : {}) }
-    : { id, name, muscle: CATALOG[catalogActiveMuscle].label, sets: 3, reps: '8–12', pause: '90 Sek' };
+    : { id, name, muscle: CATALOG[catalogActiveMuscle].label, sets: 3, reps: '8–12' };
+  if (!ex.pause) ex.pause = formatPause(recommendedPause(ex, name));
   ex.extra = true;
   collectInputValues();
   sessionExtras.push(ex);
@@ -2187,7 +2220,8 @@ function appendCatalogExercise(name, id) {
   if (catalogSessionAppend) { addSessionExtra(name, id); return; }
   const di = catalogAppendDi;
   const muscleLabel = CATALOG[catalogActiveMuscle].label;
-  const newEx = { id, name, muscle: muscleLabel, sets: 2, reps: '8–10', pause: '90 Sek', alternatives: [] };
+  const newEx = { id, name, muscle: muscleLabel, sets: 2, reps: '8–10', alternatives: [] };
+  newEx.pause = formatPause(recommendedPause(newEx, name));
   DAYS[di].exercises.push(newEx);
   if (editDraft) editDraft[di].exercises.push({ ...newEx });
   closeCatalog();
@@ -2999,8 +3033,9 @@ function addExercise(di) {
   const muscle = document.getElementById('new-ex-muscle').value.trim();
   const sets = parseInt(document.getElementById('new-ex-sets').value) || 3;
   const reps = document.getElementById('new-ex-reps').value.trim() || '8–12';
-  const pause = document.getElementById('new-ex-pause').value.trim() || '90 Sek';
   if (!name) return;
+  const pause = document.getElementById('new-ex-pause').value.trim()
+    || formatPause(recommendedPause({ name, muscle, reps }, name));
 
   // Generate a unique id for this new exercise
   const allExistingIds = new Set();
@@ -3080,6 +3115,10 @@ function renderEditDay() {
           <div class="edit-field">
             <label>Pause</label>
             <input type="text" id="edit-pause-${di}-${ei}" value="${esc(ex.pause)}">
+            ${(() => {
+              const rec = recommendedPause(ex, ex.name);
+              return rec === parsePause(ex.pause) ? '' : `<button type="button" onclick="document.getElementById('edit-pause-${di}-${ei}').value='${formatPause(rec)}'" style="background:none;border:none;color:var(--accent);font-family:var(--mono);font-size:12px;padding:4px 0 0;cursor:pointer;text-align:left">Empfohlen: ${formatPause(rec)}</button>`;
+            })()}
           </div>
           <div class="edit-field">
             <label>Schritt (kg)</label>
@@ -3138,7 +3177,7 @@ function renderEditDay() {
         </div>
         <div class="edit-field">
           <label>Pause</label>
-          <input type="text" id="new-ex-pause" placeholder="90 Sek">
+          <input type="text" id="new-ex-pause" placeholder="Auto">
         </div>
       </div>
       <button class="edit-save-btn" style="width:100%;margin-top:8px" onclick="addExercise(${di})">+ Hinzufügen</button>
@@ -3274,6 +3313,17 @@ function renderDayInner() {
     const uni = isUnilateralSlot(day, ei);
     const imbalance = uni && !sd.skipped ? sideImbalance(displayId, displayName) : null;
 
+    // Pausen-Tipp: Übernehmen nur, wenn die Pause zur Übung gehört (bei einer
+    // heute getauschten Übung gilt die Planpause der Original-Übung)
+    const lp = sd.skipped ? null : learnPause(displayId, displayName, ex);
+    let pauseHint = '';
+    if (lp?.tip) {
+      pauseHint = `<div class="pause-tip"><span>⏱ <b>Pause ${formatPause(lp.tip)}</b> statt ${formatPause(lp.planned)} – ${pauseTipText(lp)}</span>${
+        swappedName ? '' : `<button class="swap-btn active" onclick="event.stopPropagation();applyPauseTip(${ei},${lp.tip})">Übernehmen</button>`}</div>`;
+    } else if (lp?.actual && lp.actual >= lp.planned + 60) {
+      pauseHint = `<div class="pause-tip"><span>⏱ Du pausierst hier im Schnitt <b>${formatPause(lp.actual)}</b> statt ${formatPause(lp.planned)}</span></div>`;
+    }
+
     // Determine active set count (plan default or user-adjusted)
     const activeSets = (sessionData[ei] && sessionData[ei].activeSets != null)
       ? sessionData[ei].activeSets
@@ -3328,6 +3378,7 @@ function renderDayInner() {
             </div>
           ` : `
           <div class="ex-detail-meta">${esc(ex.muscle)} · ${esc(ex.sets)} Sätze · Pause ${esc(ex.pause)}</div>
+          ${pauseHint}
           ${uni ? `
           <div class="sets-header uni">
             <span>Satz</span><span>Gewicht</span><span></span><span>Links</span><span>Rechts</span><span></span>
@@ -3855,6 +3906,138 @@ function parsePause(pauseStr) {
   return 120;
 }
 
+// ── PAUSENZEITEN ──────────────────────────────────────────────
+// Empfehlung nach Übungstyp: schwere Grundübungen mit wenigen Wdh. brauchen
+// länger als Isolation mit vielen Wdh. Darauf baut das Lernen auf: Halten die
+// Wdh. über die Sätze, darf die Pause kürzer werden; brechen sie trotz
+// eingehaltener Pause ein, länger. Die App schlägt nur vor – geändert wird
+// die Pause erst, wenn der Nutzer "Übernehmen" tippt.
+const SET_WORK_SEC = 40;   // Satzdauer inkl. Eintragen (wie in calcTrainingEnd)
+const COMPOUND_RE = /presse|drücken|druecken|ruder|latzug|klimmz|kniebeuge|hackenschmidt|kreuzheben|dips|ausfallschritt/i;
+const ISOLATION_RE = /fly|curl|seitheben|strecker|beuger|kickback|trizeps|bizeps|pull-?through|facepull/i;
+const SMALL_RE = /waden|abdukt|addukt|crunch|sit-?up|beinheben/i;
+
+function formatPause(sec) {
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+const roundPause = sec => Math.round(sec / 15) * 15;
+
+function recommendedPause(ex, name) {
+  const n = name || ex.name || '';
+  const low = parseRepRange(ex.reps || '').low;
+  const lo = isNaN(low) ? 10 : low;
+  const cat = muscleCategory(ex.id, n, ex.muscle);
+  if (SMALL_RE.test(n) || cat === 'bauch') return 60;
+  if (COMPOUND_RE.test(n) && !ISOLATION_RE.test(n)) {
+    // Beine belasten den ganzen Körper stärker → jeweils eine Stufe länger
+    if (cat === 'beine') return lo <= 6 ? 180 : lo <= 8 ? 150 : 120;
+    return lo <= 5 ? 150 : lo <= 8 ? 120 : 90;
+  }
+  return lo <= 8 ? 90 : lo <= 11 ? 75 : 60;
+}
+
+// Mittlerer Rückgang der Wdh. pro Satz bei gleichem Gewicht wie im ersten
+// Satz (null = nicht auswertbar)
+function repDrop(sets) {
+  const logged = loggedSets(sets).filter(s => s.weight && s.reps);
+  if (logged.length < 2) return null;
+  const reps = logged.filter(s => s.weight === logged[0].weight).map(s => parseInt(s.reps, 10)).filter(r => !isNaN(r));
+  if (reps.length < 2) return null;
+  return (reps[0] - reps[reps.length - 1]) / (reps.length - 1);
+}
+
+// { planned, rec, actual, drop, tip, reason } – reason:
+//   'hold' – Wdh. halten stabil → kürzer   'drop' – brechen ein → länger
+//   'type' – Plan weicht stark von der Empfehlung ab, Daten sprechen nicht dagegen
+// actual = tatsächlich gemessene Pause (Schnitt), sofern vorhanden
+function learnPause(exerciseId, exerciseName, ex) {
+  const planned = defaultPauseOverrides[exerciseName] || parsePause(ex.pause);
+  const rec = recommendedPause(ex, exerciseName);
+  const date = activeDateStr(), seen = new Set(), sessions = [];
+  for (const e of getExerciseEntries(exerciseId, exerciseName)) {
+    if (sessions.length >= 6) break;
+    if (e.date === date || seen.has(e.key) || !hasLoggedData(e.sets)) continue;
+    seen.add(e.key);
+    sessions.push(e);
+  }
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const rests = sessions.map(e => e.rest).filter(Number.isFinite);
+  const actual = rests.length >= 2 ? Math.round(avg(rests)) : null;
+  // Nur Einheiten, in denen ungefähr die geplante Pause gemacht wurde – nach
+  // 5 Minuten TikTok halten die Wdh. natürlich auch bei kurzer Planpause
+  const drops = sessions
+    .filter(e => !Number.isFinite(e.rest) || e.rest <= planned + 45)
+    .map(e => repDrop(e.sets)).filter(d => d !== null);
+  const out = { planned, rec, actual, drop: null, tip: null, reason: null };
+  const floor = Math.max(45, rec - 30), ceil = rec + 60;
+  if (drops.length >= 3) out.drop = Math.round(avg(drops) * 10) / 10;
+  const d = out.drop;
+  if (d !== null && d <= 0.5 && planned > floor) {
+    // Über der Empfehlung: direkt dorthin; darunter vorsichtig in 30-s-Schritten
+    out.tip = planned > rec ? rec : Math.max(floor, roundPause(planned - 30));
+    out.reason = 'hold';
+  } else if (d !== null && d >= 2 && planned < ceil && (actual === null || actual <= planned + 30)) {
+    out.tip = Math.min(ceil, roundPause(planned + 30));
+    out.reason = 'drop';
+  } else if ((planned - rec >= 45 && (d === null || d < 2)) || (rec - planned >= 45 && (d === null || d > 0.5))) {
+    // Daten unauffällig oder zu wenige: Richtung Empfehlung, sofern die
+    // Daten nicht dagegen sprechen
+    out.tip = rec;
+    out.reason = 'type';
+  }
+  return out;
+}
+
+// Tatsächliche Pause messen: Abstand zwischen zwei abgehakten Sätzen einer
+// Übung minus Satzdauer. Gespeichert wird je Übung und Einheit nur der
+// Schnitt (slot.rest, ganze Sekunden) – spart Platz in der Cloud. Die
+// Einzelwerte leben nur im Arbeitsspeicher.
+let restClock = { key: null, byEi: {} };
+
+function recordRest(ei, s) {
+  const key = getKey(DAYS[currentDay].id, activeDateStr());
+  if (restClock.key !== key) restClock = { key, byEi: {} };
+  const now = Date.now(), slot = sessionData[ei];
+  const prev = restClock.byEi[ei];
+  const samples = prev ? prev.samples : (Number.isFinite(slot.rest) ? [slot.rest] : []);
+  restClock.byEi[ei] = { at: now, samples };
+  // Supersatz: zwischen zwei Sätzen liegt der Satz der anderen Übung – nicht vergleichbar
+  if (!prev || s === 0 || !slot.sets[s - 1]?.done || supersetInfo(curDay(), ei)) return;
+  const rest = Math.round((now - prev.at) / 1000 - SET_WORK_SEC);
+  if (rest < 20 || rest > 600) return;   // vergessen abzuhaken, App lag offen …
+  samples.push(rest);
+  slot.rest = Math.round(samples.reduce((a, b) => a + b, 0) / samples.length);
+}
+
+// "Übernehmen" beim Pausen-Tipp: ändert die Pause im Plan (bzw. bei einer
+// "nur heute"-Übung nur dort)
+function applyPauseTip(ei, sec) {
+  const planLen = DAYS[currentDay].exercises.length;
+  autoSave();
+  // Alte Pausen-Überschreibung (frühere Version) würde die neue Pause verdecken
+  const name = curDay().exercises[ei].name;
+  if (defaultPauseOverrides[name]) {
+    delete defaultPauseOverrides[name];
+    storageSet('gymbook:pausesettings', defaultPauseOverrides);
+  }
+  if (ei >= planLen) {
+    sessionExtras[ei - planLen].pause = formatPause(sec);
+    saveSession();
+  } else {
+    DAYS[currentDay].exercises[ei].pause = formatPause(sec);
+    persistActivePlan();
+  }
+  renderDay();
+  reopenCard(ei);
+}
+
+function pauseTipText(lp) {
+  return lp.reason === 'hold' ? 'deine Wdh. halten über alle Sätze'
+       : lp.reason === 'drop' ? `deine Wdh. fallen pro Satz um ${num(lp.drop)}`
+       : 'empfohlen für diesen Übungstyp';
+}
+
 function getRemainingSeconds() {
   if (!timerStartTime) return 0;
   if (timerPaused) return timerPausedAt;
@@ -4240,6 +4423,7 @@ function toggleDone(ei, s) {
   updateProgressBars(ei);
 
   if (done) {
+    recordRest(ei, s);
     // Gewicht in den nächsten Satz übernehmen, falls dort leer. Die
     // Wiederholungen bewusst NICHT – dort steht das eigene Satzziel als
     // Vorschlag (setTargets), das sonst überschrieben würde.
@@ -4711,6 +4895,7 @@ function showExerciseDetail(exerciseId, exerciseName) {
     : profile.mode === 'fast'
       ? `<b>Zügig steigern.</b> ${profile.easies} von ${profile.events} Erhöhungen hast du direkt mit der Obergrenze geschafft – daher doppelte Schritte.`
       : `<b>Normal steigern.</b> Die letzten ${profile.events} Erhöhungen liefen unauffällig.`;
+  const lp = planEx ? learnPause(exerciseId, exerciseName, planEx) : null;
 
   // Verlauf: Gewicht wenn vorhanden, sonst Wiederholungen (Körpergewichtsübungen)
   const weights = history.map(sets => {
@@ -4751,6 +4936,12 @@ function showExerciseDetail(exerciseId, exerciseName) {
       ${profileText ? `
       <div style="grid-column:1/-1;background:var(--bg3);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
         <div style="font-size:12px;color:var(--muted);margin-bottom:3px">Gelernt aus deinen Erhöhungen</div>${profileText}
+      </div>` : ''}
+      ${lp ? `
+      <div style="grid-column:1/-1;background:var(--bg3);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:3px">Satzpause</div>
+        Im Plan <b>${formatPause(lp.planned)}</b> · empfohlen ${formatPause(lp.rec)}${lp.actual ? ` · gemessen ⌀ ${formatPause(lp.actual)}` : ''}
+        ${lp.tip ? `<div style="margin-top:4px"><b>Tipp: ${formatPause(lp.tip)}</b> – ${pauseTipText(lp)}. Übernehmen kannst du ihn im Training direkt in der Übungskarte.</div>` : ''}
       </div>` : ''}
       ${stagnation ? `
       <div style="grid-column:1/-1;background:color-mix(in srgb, var(--legs) 12%, transparent);border-radius:8px;padding:12px;font-size:13px;line-height:1.5">
@@ -5829,6 +6020,12 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 // ─────────────────────────────────────────────────────────────
 
 // Init
+// Plan-Anpassungen, eigener Katalog und Pausen sofort aus dem lokalen
+// Speicher – vorher kamen sie nur nach einem erfolgreichen Cloud-Abruf, und
+// ohne Netz im Gym zeigte die App den unveränderten Originalplan.
+loadCustomPlan();
+loadCustomCatalog();
+loadPauseSettings();
 updateTimerLabel();
 renderNav();
 switchTab('home');
